@@ -35,10 +35,14 @@ python examples/streaming_chat.py --api-key cca_yourkey
 # Or use environment variable
 export CLAUDE_API_KEY=cca_yourkey
 python examples/streaming_chat.py
+
+# Debug mode - see token boundaries
+python examples/streaming_chat.py --debug
 ```
 
 ### Features
 
+- **Real-time streaming** - tokens appear as they're generated
 - Connects to the Claude Code API
 - Multiple model support (haiku, sonnet, opus)
 - Custom system prompts
@@ -65,10 +69,10 @@ Then open http://localhost:7743 in your browser.
 
 ### Features
 
+- **Real-time streaming** - watch responses appear token by token
 - Modern dark-themed UI
 - Model selection (haiku, sonnet, opus)
 - API status indicator
-- Typing indicators
 - Mobile-responsive design
 - Auth support via `CLAUDE_API_KEY` env var
 

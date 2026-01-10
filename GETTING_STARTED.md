@@ -84,9 +84,20 @@ curl -H "Authorization: Bearer cca_your_key_here" \
 
 Auth is automatically enabled when `.api-keys` exists.
 
+## 8. Try Streaming Chat
+
+```sh
+# Terminal chat with real-time streaming
+make chat
+
+# Web chat UI
+make chat-web
+# Open http://localhost:7743
+```
+
 ## Next Steps
 
 - See [README.md](README.md) for full documentation
-- Try the `/llm/json` endpoint for structured responses
+- Try the `/llm/chat/stream` endpoint for real-time streaming
 - Visit http://localhost:7742/docs for interactive API docs
 - Run `make help` to see all available commands
