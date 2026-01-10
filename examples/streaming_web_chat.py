@@ -1,35 +1,43 @@
 #!/usr/bin/env python3
 """
-Streaming Web Chat Example for Claude Code API
+Web Chat Example for Claude Code API
 
-A simple web-based chat application with real-time streaming responses
-using FastAPI and Server-Sent Events (SSE).
+A simple web-based chat application that connects to the Claude Code API.
+Demonstrates using the API from a web frontend.
 
 Usage:
+    # First start the API server
+    make server
+
+    # Then run this web chat
     uvicorn examples.streaming_web_chat:app --reload --port 7743
-    # Then open http://localhost:7743 in your browser
+    # Open http://localhost:7743 in your browser
 
 Requirements:
-    pip install fastapi uvicorn sse-starlette
-    - Claude Code CLI installed: npm install -g @anthropic-ai/claude-code
-    - Authenticated: claude auth login
+    pip install fastapi uvicorn httpx
+    - Claude Code API server running on port 7742
 """
 
-import asyncio
-import json
 import os
-import shutil
-from typing import AsyncGenerator, Optional
+from typing import Optional
+
+try:
+    import httpx
+except ImportError:
+    raise ImportError("httpx required. Install with: pip install httpx")
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from sse_starlette.sse import EventSourceResponse
 
 app = FastAPI(
-    title="Claude Streaming Chat",
-    description="Web-based streaming chat with Claude",
+    title="Claude Web Chat",
+    description="Web-based chat using Claude Code API",
     version="1.0.0",
 )
+
+# API configuration
+API_URL = os.environ.get("CLAUDE_API_URL", "http://localhost:7742")
+API_KEY = os.environ.get("CLAUDE_API_KEY")
 
 
 # HTML template for the chat interface
@@ -39,7 +47,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Streaming Chat</title>
+    <title>Claude Web Chat</title>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -92,6 +100,20 @@ HTML_TEMPLATE = """
             cursor: pointer;
         }
 
+        .header .api-status {
+            margin-left: auto;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .header .api-status.connected {
+            color: var(--accent);
+        }
+
+        .header .api-status.error {
+            color: #ef4444;
+        }
+
         .chat-container {
             flex: 1;
             overflow-y: auto;
@@ -132,8 +154,12 @@ HTML_TEMPLATE = """
             letter-spacing: 0.05em;
         }
 
-        .message.streaming {
-            border-color: var(--accent);
+        .message.error {
+            border-color: #ef4444;
+        }
+
+        .message.error .label {
+            color: #ef4444;
         }
 
         .input-container {
@@ -225,12 +251,13 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="header">
-        <h1>Claude Streaming Chat</h1>
+        <h1>Claude Web Chat</h1>
         <select id="modelSelect">
             <option value="haiku">Haiku (Fast)</option>
             <option value="sonnet">Sonnet (Balanced)</option>
             <option value="opus">Opus (Powerful)</option>
         </select>
+        <div class="api-status" id="apiStatus">Checking API...</div>
     </div>
 
     <div class="chat-container" id="chatContainer">
@@ -256,19 +283,39 @@ HTML_TEMPLATE = """
         const userInput = document.getElementById('userInput');
         const sendBtn = document.getElementById('sendBtn');
         const modelSelect = document.getElementById('modelSelect');
+        const apiStatus = document.getElementById('apiStatus');
 
-        let isStreaming = false;
+        let isProcessing = false;
 
-        function addMessage(content, type, isStreaming = false) {
+        // Check API status on load
+        async function checkApiStatus() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                if (data.api_available) {
+                    apiStatus.textContent = 'API Connected';
+                    apiStatus.className = 'api-status connected';
+                } else {
+                    apiStatus.textContent = 'API Unavailable';
+                    apiStatus.className = 'api-status error';
+                }
+            } catch (e) {
+                apiStatus.textContent = 'API Error';
+                apiStatus.className = 'api-status error';
+            }
+        }
+        checkApiStatus();
+
+        function addMessage(content, type, isError = false) {
             // Remove empty state if present
             const emptyState = chatContainer.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
 
             const div = document.createElement('div');
-            div.className = `message ${type}` + (isStreaming ? ' streaming' : '');
+            div.className = `message ${type}` + (isError ? ' error' : '');
 
             if (type === 'claude') {
-                div.innerHTML = `<div class="label">Claude</div><div class="content">${content}</div>`;
+                div.innerHTML = `<div class="label">${isError ? 'Error' : 'Claude'}</div><div class="content">${escapeHtml(content)}</div>`;
             } else {
                 div.textContent = content;
             }
@@ -278,9 +325,15 @@ HTML_TEMPLATE = """
             return div;
         }
 
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function showTypingIndicator() {
             const div = document.createElement('div');
-            div.className = 'message claude streaming';
+            div.className = 'message claude';
             div.id = 'typingIndicator';
             div.innerHTML = `
                 <div class="label">Claude</div>
@@ -299,9 +352,9 @@ HTML_TEMPLATE = """
 
         async function sendMessage() {
             const message = userInput.value.trim();
-            if (!message || isStreaming) return;
+            if (!message || isProcessing) return;
 
-            isStreaming = true;
+            isProcessing = true;
             sendBtn.disabled = true;
             userInput.value = '';
             userInput.style.height = 'auto';
@@ -314,56 +367,29 @@ HTML_TEMPLATE = """
 
             try {
                 const model = modelSelect.value;
-                const url = `/stream?prompt=${encodeURIComponent(message)}&model=${model}`;
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({prompt: message, model: model})
+                });
 
-                const eventSource = new EventSource(url);
-                let claudeMessage = null;
-                let responseText = '';
+                removeTypingIndicator();
 
-                eventSource.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
+                const data = await response.json();
 
-                    if (data.type === 'start') {
-                        removeTypingIndicator();
-                        claudeMessage = addMessage('', 'claude', true);
-                    } else if (data.type === 'chunk') {
-                        responseText += data.text;
-                        if (claudeMessage) {
-                            claudeMessage.querySelector('.content').textContent = responseText;
-                            chatContainer.scrollTop = chatContainer.scrollHeight;
-                        }
-                    } else if (data.type === 'end') {
-                        if (claudeMessage) {
-                            claudeMessage.classList.remove('streaming');
-                        }
-                        eventSource.close();
-                        isStreaming = false;
-                        sendBtn.disabled = false;
-                        userInput.focus();
-                    } else if (data.type === 'error') {
-                        removeTypingIndicator();
-                        addMessage(`Error: ${data.message}`, 'claude');
-                        eventSource.close();
-                        isStreaming = false;
-                        sendBtn.disabled = false;
-                    }
-                };
-
-                eventSource.onerror = () => {
-                    removeTypingIndicator();
-                    if (isStreaming) {
-                        addMessage('Connection error. Please try again.', 'claude');
-                    }
-                    eventSource.close();
-                    isStreaming = false;
-                    sendBtn.disabled = false;
-                };
+                if (response.ok && !data.is_error) {
+                    addMessage(data.text, 'claude');
+                } else {
+                    addMessage(data.error || data.text || 'Unknown error', 'claude', true);
+                }
 
             } catch (error) {
                 removeTypingIndicator();
-                addMessage(`Error: ${error.message}`, 'claude');
-                isStreaming = false;
+                addMessage(`Connection error: ${error.message}`, 'claude', true);
+            } finally {
+                isProcessing = false;
                 sendBtn.disabled = false;
+                userInput.focus();
             }
         }
 
@@ -397,122 +423,70 @@ async def index():
     return HTML_TEMPLATE
 
 
-async def generate_stream(
-    prompt: str,
-    model: str = "haiku",
-    system: Optional[str] = None,
-) -> AsyncGenerator[dict, None]:
-    """
-    Generate streaming response from Claude CLI using async subprocess.
-
-    Yields SSE-formatted events with the response chunks in real-time.
-    """
-    # Check for Claude CLI
-    if not shutil.which("claude"):
-        yield {"event": "message", "data": json.dumps({"type": "error", "message": "Claude CLI not found"})}
-        return
-
-    # Build command with --include-partial-messages for token-level streaming
-    cmd = [
-        "claude",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--include-partial-messages",  # Enable token-level streaming
-        "--verbose",
-        "--model",
-        model,
-        "--max-turns",
-        "1",
-    ]
-
-    if system:
-        cmd.extend(["--system-prompt", system])
-
-    cmd.extend(["--", prompt])
-
-    # Start streaming
-    yield {"event": "message", "data": json.dumps({"type": "start"})}
-
-    # Use asyncio subprocess for non-blocking streaming
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-
-    has_streamed = False
-
+@app.get("/api/health")
+async def api_health():
+    """Check if the Claude Code API is available."""
     try:
-        # Read lines asynchronously for true real-time streaming
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-
-            line = line.decode().strip()
-            if not line:
-                continue
-
-            try:
-                msg = json.loads(line)
-                msg_type = msg.get("type")
-
-                # Handle stream_event messages (token-level streaming)
-                if msg_type == "stream_event":
-                    event = msg.get("event", {})
-                    event_type = event.get("type")
-
-                    if event_type == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text", "")
-                            if text:
-                                has_streamed = True
-                                yield {"event": "message", "data": json.dumps({"type": "chunk", "text": text})}
-
-                # Fallback: if no streaming, use the result
-                elif msg_type == "result" and not has_streamed:
-                    result_text = msg.get("result", "")
-                    if result_text:
-                        yield {"event": "message", "data": json.dumps({"type": "chunk", "text": result_text})}
-
-            except json.JSONDecodeError:
-                continue
-
-    except Exception as e:
-        yield {"event": "message", "data": json.dumps({"type": "error", "message": str(e)})}
-
-    finally:
-        await process.wait()
-        yield {"event": "message", "data": json.dumps({"type": "end"})}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{API_URL}/health", timeout=5.0)
+            if response.status_code == 200:
+                return {"api_available": True, "api_url": API_URL}
+    except Exception:
+        pass
+    return {"api_available": False, "api_url": API_URL}
 
 
-@app.get("/stream")
-async def stream(
-    prompt: str = Query(..., description="The prompt to send to Claude"),
-    model: str = Query("haiku", description="Model to use: haiku, sonnet, opus"),
-    system: Optional[str] = Query(None, description="Optional system prompt"),
-):
+@app.post("/api/chat")
+async def chat(request: dict):
     """
-    Stream a response from Claude using Server-Sent Events.
+    Proxy chat request to the Claude Code API.
 
-    The response is streamed in real-time as Claude generates it.
+    This endpoint forwards requests to the main API server,
+    handling authentication if an API key is configured.
     """
+    prompt = request.get("prompt")
+    model = request.get("model", "haiku")
+    system = request.get("system")
+
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+
     if model not in ("haiku", "sonnet", "opus"):
         raise HTTPException(status_code=400, detail="Invalid model. Use: haiku, sonnet, opus")
 
-    return EventSourceResponse(generate_stream(prompt, model, system))
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    payload = {"prompt": prompt, "model": model}
+    if system:
+        payload["system"] = system
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{API_URL}/llm/chat",
+                json=payload,
+                headers=headers,
+                timeout=120.0,
+            )
+
+            if response.status_code == 401:
+                return {"is_error": True, "error": "API authentication required. Set CLAUDE_API_KEY environment variable."}
+
+            data = response.json()
+            return data
+
+    except httpx.ConnectError:
+        return {"is_error": True, "error": f"Cannot connect to API at {API_URL}. Is the server running?"}
+    except Exception as e:
+        return {"is_error": True, "error": str(e)}
 
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {"status": "ok", "claude_available": shutil.which("claude") is not None}
+    """Health check endpoint for this web chat server."""
+    return {"status": "ok", "api_url": API_URL}
 
 
 if __name__ == "__main__":

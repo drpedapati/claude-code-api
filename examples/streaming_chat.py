@@ -2,26 +2,28 @@
 """
 Streaming Chat Example for Claude Code API
 
-A simple terminal chat application demonstrating real-time streaming
-responses from Claude using the Claude Code CLI.
+A simple terminal chat application demonstrating how to use
+the Claude Code API for chat requests.
 
 Usage:
     python examples/streaming_chat.py
     python examples/streaming_chat.py --model sonnet
-    python examples/streaming_chat.py --system "You are a pirate. Always respond in pirate speak."
+    python examples/streaming_chat.py --api-key cca_yourkey
 
 Requirements:
-    - Claude Code CLI installed: npm install -g @anthropic-ai/claude-code
-    - Authenticated: claude auth login
+    - Claude Code API server running: make server
+    - pip install httpx
 """
 
 import argparse
-import json
 import os
-import shutil
-import subprocess
 import sys
-from typing import Generator, Optional
+
+try:
+    import httpx
+except ImportError:
+    print("Error: httpx required. Install with: pip install httpx")
+    sys.exit(1)
 
 
 # ANSI color codes for pretty output
@@ -35,129 +37,78 @@ class Colors:
     RESET = "\033[0m"
 
 
-def stream_chat(
+DEFAULT_API_URL = "http://localhost:7742"
+
+
+def chat(
     prompt: str,
     model: str = "haiku",
-    system: Optional[str] = None,
-    max_turns: int = 1,
-) -> Generator[str, None, None]:
+    system: str | None = None,
+    api_url: str = DEFAULT_API_URL,
+    api_key: str | None = None,
+) -> str:
     """
-    Stream a chat response from Claude, yielding text chunks as they arrive.
+    Send a chat request to the Claude Code API.
 
     Args:
         prompt: The user prompt to send
         model: Model to use (haiku, sonnet, opus)
         system: Optional system prompt
-        max_turns: Maximum conversation turns
+        api_url: API base URL
+        api_key: Optional API key for authentication
 
-    Yields:
-        Text chunks as they are received from Claude
-
-    Example:
-        for chunk in stream_chat("Tell me a story"):
-            print(chunk, end="", flush=True)
+    Returns:
+        The response text from Claude
     """
-    # Build command with --include-partial-messages for token-level streaming
-    cmd = [
-        "claude",
-        "-p",  # Print mode (non-interactive)
-        "--output-format",
-        "stream-json",
-        "--include-partial-messages",  # Enable token-level streaming
-        "--verbose",
-        "--model",
-        model,
-        "--max-turns",
-        str(max_turns),
-    ]
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
+    payload = {"prompt": prompt, "model": model}
     if system:
-        cmd.extend(["--system-prompt", system])
+        payload["system"] = system
 
-    cmd.extend(["--", prompt])
-
-    # Start process with unbuffered streaming output
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=0,  # Unbuffered
-        env=env,
+    response = httpx.post(
+        f"{api_url}/llm/chat",
+        json=payload,
+        headers=headers,
+        timeout=120.0,
     )
 
-    # Track if we've yielded any streaming content
-    has_streamed = False
+    if response.status_code == 401:
+        raise RuntimeError("Authentication required. Use --api-key or create a key with: make api-key-create")
 
-    # Use readline() in a loop for true real-time streaming
-    # (for line in file uses internal buffering that delays output)
-    try:
-        while True:
-            line = process.stdout.readline()
-            if not line:
-                # Check if process has ended
-                if process.poll() is not None:
-                    break
-                continue
+    response.raise_for_status()
+    data = response.json()
 
-            line = line.strip()
-            if not line:
-                continue
+    if data.get("is_error"):
+        raise RuntimeError(data.get("text", "Unknown error"))
 
-            try:
-                msg = json.loads(line)
-                msg_type = msg.get("type")
-
-                # Handle stream_event messages (token-level streaming)
-                if msg_type == "stream_event":
-                    event = msg.get("event", {})
-                    event_type = event.get("type")
-
-                    if event_type == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text", "")
-                            if text:
-                                has_streamed = True
-                                yield text
-
-                # Fallback: if no streaming, use the result
-                elif msg_type == "result" and not has_streamed:
-                    result_text = msg.get("result", "")
-                    if result_text:
-                        yield result_text
-
-            except json.JSONDecodeError:
-                # Not JSON, might be raw output
-                continue
-
-    finally:
-        process.wait()
-
-        # Check for errors
-        if process.returncode != 0:
-            stderr = process.stderr.read() if process.stderr else ""
-            raise RuntimeError(f"Claude CLI error (exit {process.returncode}): {stderr}")
+    return data.get("text", "")
 
 
-def chat_loop(model: str = "haiku", system: Optional[str] = None, debug: bool = False) -> None:
+def chat_loop(
+    model: str = "haiku",
+    system: str | None = None,
+    api_url: str = DEFAULT_API_URL,
+    api_key: str | None = None,
+) -> None:
     """
-    Run an interactive chat loop with streaming responses.
+    Run an interactive chat loop.
 
     Args:
         model: Model to use
         system: Optional system prompt
-        debug: Show chunk boundaries
+        api_url: API base URL
+        api_key: Optional API key
     """
-    print(f"\n{Colors.BOLD}{Colors.CYAN}Claude Code Streaming Chat{Colors.RESET}")
+    print(f"\n{Colors.BOLD}{Colors.CYAN}Claude Code API Chat{Colors.RESET}")
+    print(f"{Colors.DIM}API: {api_url}{Colors.RESET}")
     print(f"{Colors.DIM}Model: {model}{Colors.RESET}")
     if system:
         print(f"{Colors.DIM}System: {system[:50]}...{Colors.RESET}" if len(system) > 50 else f"{Colors.DIM}System: {system}{Colors.RESET}")
-    if debug:
-        print(f"{Colors.YELLOW}Debug mode: showing chunk boundaries{Colors.RESET}")
+    if api_key:
+        print(f"{Colors.DIM}Auth: API key configured{Colors.RESET}")
     print(f"{Colors.DIM}Type 'quit' or 'exit' to end the conversation{Colors.RESET}")
     print(f"{Colors.DIM}{'─' * 50}{Colors.RESET}\n")
 
@@ -173,29 +124,27 @@ def chat_loop(model: str = "haiku", system: Optional[str] = None, debug: bool = 
                 print(f"\n{Colors.DIM}Goodbye!{Colors.RESET}")
                 break
 
-            # Stream the response
+            # Send request
             print(f"\n{Colors.CYAN}Claude:{Colors.RESET} ", end="", flush=True)
 
             try:
-                response_text = ""
-                chunk_count = 0
-                for chunk in stream_chat(user_input, model=model, system=system):
-                    chunk_count += 1
-                    if debug:
-                        print(f"{Colors.DIM}[{chunk_count}]{Colors.RESET}{chunk}", end="", flush=True)
-                    else:
-                        print(chunk, end="", flush=True)
-                    response_text += chunk
-
-                # Ensure we end with a newline
-                if response_text and not response_text.endswith("\n"):
-                    print()
-                if debug:
-                    print(f"{Colors.DIM}(Received {chunk_count} chunks){Colors.RESET}")
+                response = chat(
+                    user_input,
+                    model=model,
+                    system=system,
+                    api_url=api_url,
+                    api_key=api_key,
+                )
+                print(response)
                 print()  # Extra blank line for readability
 
             except RuntimeError as e:
                 print(f"\n{Colors.RED}Error: {e}{Colors.RESET}\n")
+            except httpx.HTTPStatusError as e:
+                print(f"\n{Colors.RED}HTTP Error: {e.response.status_code}{Colors.RESET}\n")
+            except httpx.ConnectError:
+                print(f"\n{Colors.RED}Connection failed. Is the API server running?{Colors.RESET}")
+                print(f"{Colors.DIM}Start with: make server{Colors.RESET}\n")
 
         except KeyboardInterrupt:
             print(f"\n\n{Colors.DIM}Interrupted. Goodbye!{Colors.RESET}")
@@ -208,62 +157,58 @@ def chat_loop(model: str = "haiku", system: Optional[str] = None, debug: bool = 
 def single_query(
     prompt: str,
     model: str = "haiku",
-    system: Optional[str] = None,
-    debug: bool = False,
+    system: str | None = None,
+    api_url: str = DEFAULT_API_URL,
+    api_key: str | None = None,
 ) -> None:
     """
-    Run a single streaming query and exit.
+    Run a single query and exit.
 
     Args:
         prompt: The prompt to send
         model: Model to use
         system: Optional system prompt
-        debug: Show chunk boundaries
+        api_url: API base URL
+        api_key: Optional API key
     """
     print(f"{Colors.CYAN}Claude:{Colors.RESET} ", end="", flush=True)
 
     try:
-        chunk_count = 0
-        for chunk in stream_chat(prompt, model=model, system=system):
-            chunk_count += 1
-            if debug:
-                # Show each chunk with a marker
-                print(f"{Colors.DIM}[{chunk_count}]{Colors.RESET}{chunk}", end="", flush=True)
-            else:
-                print(chunk, end="", flush=True)
-        print()  # Final newline
-        if debug:
-            print(f"{Colors.DIM}(Received {chunk_count} chunks){Colors.RESET}")
+        response = chat(prompt, model=model, system=system, api_url=api_url, api_key=api_key)
+        print(response)
     except RuntimeError as e:
         print(f"\n{Colors.RED}Error: {e}{Colors.RESET}")
+        sys.exit(1)
+    except httpx.ConnectError:
+        print(f"\n{Colors.RED}Connection failed. Is the API server running?{Colors.RESET}")
+        print(f"{Colors.DIM}Start with: make server{Colors.RESET}")
         sys.exit(1)
 
 
 def main():
     """Main entry point."""
-    # Check for Claude CLI
-    if not shutil.which("claude"):
-        print(f"{Colors.RED}Error: Claude CLI not found{Colors.RESET}")
-        print(f"{Colors.DIM}Install with: npm install -g @anthropic-ai/claude-code{Colors.RESET}")
-        sys.exit(1)
-
-    # Parse arguments
     parser = argparse.ArgumentParser(
-        description="Streaming chat with Claude",
+        description="Chat with Claude via the Claude Code API",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+    # Start the API server first
+    make server
+
     # Interactive chat
-    python streaming_chat.py
+    python examples/streaming_chat.py
 
     # Use a different model
-    python streaming_chat.py --model sonnet
+    python examples/streaming_chat.py --model sonnet
 
     # With a system prompt
-    python streaming_chat.py --system "You are a helpful coding assistant"
+    python examples/streaming_chat.py --system "You are a helpful coding assistant"
 
     # Single query (non-interactive)
-    python streaming_chat.py --query "What is Python?"
+    python examples/streaming_chat.py --query "What is Python?"
+
+    # With API key authentication
+    python examples/streaming_chat.py --api-key cca_yourkey
         """,
     )
     parser.add_argument(
@@ -286,19 +231,46 @@ Examples:
         help="Single query mode (non-interactive)",
     )
     parser.add_argument(
-        "--debug",
-        "-d",
-        action="store_true",
-        help="Debug mode: show chunk boundaries with [markers]",
+        "--api-url",
+        default=os.environ.get("CLAUDE_API_URL", DEFAULT_API_URL),
+        help=f"API base URL (default: {DEFAULT_API_URL})",
+    )
+    parser.add_argument(
+        "--api-key",
+        "-k",
+        default=os.environ.get("CLAUDE_API_KEY"),
+        help="API key for authentication (or set CLAUDE_API_KEY env var)",
     )
 
     args = parser.parse_args()
 
+    # Check API is reachable
+    try:
+        response = httpx.get(f"{args.api_url}/health", timeout=5.0)
+        if response.status_code != 200:
+            print(f"{Colors.RED}API server not healthy{Colors.RESET}")
+            sys.exit(1)
+    except httpx.ConnectError:
+        print(f"{Colors.RED}Cannot connect to API at {args.api_url}{Colors.RESET}")
+        print(f"{Colors.DIM}Start the server with: make server{Colors.RESET}")
+        sys.exit(1)
+
     # Run in single query or interactive mode
     if args.query:
-        single_query(args.query, model=args.model, system=args.system, debug=args.debug)
+        single_query(
+            args.query,
+            model=args.model,
+            system=args.system,
+            api_url=args.api_url,
+            api_key=args.api_key,
+        )
     else:
-        chat_loop(model=args.model, system=args.system, debug=args.debug)
+        chat_loop(
+            model=args.model,
+            system=args.system,
+            api_url=args.api_url,
+            api_key=args.api_key,
+        )
 
 
 if __name__ == "__main__":
