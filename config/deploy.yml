@@ -61,8 +61,9 @@ env:
 # SSH configuration
 ssh:
   user: <%= ENV['KAMAL_SSH_USER'] || 'root' %>
-  keys:
-    - ~/.ssh/id_ed25519
+  # Optionally specify key path if not using default
+  # keys:
+  #   - ~/.ssh/id_ed25519
 
 # Container settings
 retain_containers: 3
