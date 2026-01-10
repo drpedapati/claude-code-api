@@ -138,17 +138,21 @@ docker-run:
 	@if docker ps --format '{{.Names}}' | grep -q "^$(CONTAINER_NAME)$$"; then \
 		echo "$(YELLOW)Container already running$(RESET)"; \
 	else \
+		if [ -z "$${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then \
+			echo "$(YELLOW)⚠ CLAUDE_CODE_OAUTH_TOKEN not set$(RESET)"; \
+			echo "$(DIM)  Generate with: claude setup-token$(RESET)"; \
+			echo "$(DIM)  Then: CLAUDE_CODE_OAUTH_TOKEN=... make docker-run$(RESET)"; \
+		fi; \
 		docker run -d \
 			--name $(CONTAINER_NAME) \
 			-p $(PORT):8000 \
 			-v claude-code-data:/home/appuser/.claude \
-			-e ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY:-} \
+			-e CLAUDE_CODE_OAUTH_TOKEN=$${CLAUDE_CODE_OAUTH_TOKEN:-} \
 			$(IMAGE_NAME):$(IMAGE_TAG); \
 		sleep 2; \
 		echo "$(GREEN)✓ Container started$(RESET)"; \
 		echo "$(DIM)  API: http://localhost:$(PORT)$(RESET)"; \
 		echo "$(DIM)  Docs: http://localhost:$(PORT)/docs$(RESET)"; \
-		echo "$(DIM)  Note: Set ANTHROPIC_API_KEY or run 'make docker-shell' and 'claude auth login'$(RESET)"; \
 	fi
 
 docker-stop:
