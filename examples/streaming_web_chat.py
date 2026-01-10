@@ -16,6 +16,7 @@ Requirements:
 """
 
 import json
+import os
 import shutil
 import subprocess
 from typing import AsyncGenerator, Optional
@@ -433,18 +434,30 @@ async def generate_stream(
     # Start streaming
     yield {"event": "message", "data": json.dumps({"type": "start"})}
 
+    # Use unbuffered output for real-time streaming
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
+        bufsize=0,  # Unbuffered
+        env=env,
     )
 
     has_streamed = False
 
     try:
-        for line in process.stdout:
+        # Use readline() for true real-time streaming
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                if process.poll() is not None:
+                    break
+                continue
+
             line = line.strip()
             if not line:
                 continue

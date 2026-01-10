@@ -17,6 +17,7 @@ Requirements:
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -75,21 +76,33 @@ def stream_chat(
 
     cmd.extend(["--", prompt])
 
-    # Start process with streaming output
+    # Start process with unbuffered streaming output
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,  # Line buffered
+        bufsize=0,  # Unbuffered
+        env=env,
     )
 
     # Track if we've yielded any streaming content
     has_streamed = False
 
-    # Stream the output line by line
+    # Use readline() in a loop for true real-time streaming
+    # (for line in file uses internal buffering that delays output)
     try:
-        for line in process.stdout:
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                # Check if process has ended
+                if process.poll() is not None:
+                    break
+                continue
+
             line = line.strip()
             if not line:
                 continue
@@ -130,18 +143,21 @@ def stream_chat(
             raise RuntimeError(f"Claude CLI error (exit {process.returncode}): {stderr}")
 
 
-def chat_loop(model: str = "haiku", system: Optional[str] = None) -> None:
+def chat_loop(model: str = "haiku", system: Optional[str] = None, debug: bool = False) -> None:
     """
     Run an interactive chat loop with streaming responses.
 
     Args:
         model: Model to use
         system: Optional system prompt
+        debug: Show chunk boundaries
     """
     print(f"\n{Colors.BOLD}{Colors.CYAN}Claude Code Streaming Chat{Colors.RESET}")
     print(f"{Colors.DIM}Model: {model}{Colors.RESET}")
     if system:
         print(f"{Colors.DIM}System: {system[:50]}...{Colors.RESET}" if len(system) > 50 else f"{Colors.DIM}System: {system}{Colors.RESET}")
+    if debug:
+        print(f"{Colors.YELLOW}Debug mode: showing chunk boundaries{Colors.RESET}")
     print(f"{Colors.DIM}Type 'quit' or 'exit' to end the conversation{Colors.RESET}")
     print(f"{Colors.DIM}{'─' * 50}{Colors.RESET}\n")
 
@@ -162,13 +178,20 @@ def chat_loop(model: str = "haiku", system: Optional[str] = None) -> None:
 
             try:
                 response_text = ""
+                chunk_count = 0
                 for chunk in stream_chat(user_input, model=model, system=system):
-                    print(chunk, end="", flush=True)
+                    chunk_count += 1
+                    if debug:
+                        print(f"{Colors.DIM}[{chunk_count}]{Colors.RESET}{chunk}", end="", flush=True)
+                    else:
+                        print(chunk, end="", flush=True)
                     response_text += chunk
 
                 # Ensure we end with a newline
                 if response_text and not response_text.endswith("\n"):
                     print()
+                if debug:
+                    print(f"{Colors.DIM}(Received {chunk_count} chunks){Colors.RESET}")
                 print()  # Extra blank line for readability
 
             except RuntimeError as e:
@@ -186,6 +209,7 @@ def single_query(
     prompt: str,
     model: str = "haiku",
     system: Optional[str] = None,
+    debug: bool = False,
 ) -> None:
     """
     Run a single streaming query and exit.
@@ -194,13 +218,22 @@ def single_query(
         prompt: The prompt to send
         model: Model to use
         system: Optional system prompt
+        debug: Show chunk boundaries
     """
     print(f"{Colors.CYAN}Claude:{Colors.RESET} ", end="", flush=True)
 
     try:
+        chunk_count = 0
         for chunk in stream_chat(prompt, model=model, system=system):
-            print(chunk, end="", flush=True)
+            chunk_count += 1
+            if debug:
+                # Show each chunk with a marker
+                print(f"{Colors.DIM}[{chunk_count}]{Colors.RESET}{chunk}", end="", flush=True)
+            else:
+                print(chunk, end="", flush=True)
         print()  # Final newline
+        if debug:
+            print(f"{Colors.DIM}(Received {chunk_count} chunks){Colors.RESET}")
     except RuntimeError as e:
         print(f"\n{Colors.RED}Error: {e}{Colors.RESET}")
         sys.exit(1)
@@ -252,14 +285,20 @@ Examples:
         default=None,
         help="Single query mode (non-interactive)",
     )
+    parser.add_argument(
+        "--debug",
+        "-d",
+        action="store_true",
+        help="Debug mode: show chunk boundaries with [markers]",
+    )
 
     args = parser.parse_args()
 
     # Run in single query or interactive mode
     if args.query:
-        single_query(args.query, model=args.model, system=args.system)
+        single_query(args.query, model=args.model, system=args.system, debug=args.debug)
     else:
-        chat_loop(model=args.model, system=args.system)
+        chat_loop(model=args.model, system=args.system, debug=args.debug)
 
 
 if __name__ == "__main__":
