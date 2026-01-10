@@ -106,6 +106,7 @@ uvicorn claude_code_api.server:app --host 0.0.0.0 --port 8000
 |--------|----------|-------------|
 | `GET` | `/health` | Health check for load balancers |
 | `GET` | `/llm/status` | Verify Claude CLI availability |
+| `GET` | `/llm/models` | List available models with pricing |
 | `POST` | `/llm/chat` | Send prompt, receive text response |
 | `POST` | `/llm/json` | Send prompt, receive parsed JSON |
 
@@ -136,11 +137,13 @@ API documentation is available at:
 
 ## Models
 
-| Model | Description | Use Case |
-|-------|-------------|----------|
-| `haiku` | Fast, cost-effective | High-volume queries, simple tasks |
-| `sonnet` | Balanced performance | General-purpose use |
-| `opus` | Most capable | Complex reasoning, nuanced tasks |
+| Model | API ID | Description | Pricing (per MTok) |
+|-------|--------|-------------|-------------------|
+| `haiku` | `claude-haiku-4-5-20251001` | Our fastest model with near-frontier intelligence | $1 / $5 |
+| `sonnet` | `claude-sonnet-4-5-20250929` | Our smart model for complex agents and coding | $3 / $15 |
+| `opus` | `claude-opus-4-5-20251101` | Premium model combining maximum intelligence with practical performance | $5 / $25 |
+
+See [Anthropic Models Overview](https://platform.claude.com/docs/en/about-claude/models/overview) for full details.
 
 ## Configuration
 
@@ -228,6 +231,48 @@ try:
 except RuntimeError as e:
     print(f"Claude CLI error: {e}")
 ```
+
+## Deployment
+
+### Docker
+
+```sh
+# Build and run locally
+make docker-build
+make docker-run
+
+# With OAuth token (for authenticated requests)
+source .env.local
+CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" make docker-run
+```
+
+### Kamal (Production)
+
+This project includes [Kamal 2.9+](https://kamal-deploy.org/) configuration for production deployment.
+
+```sh
+# Install Kamal
+gem install kamal
+
+# Configure secrets
+cp .kamal/secrets.example .kamal/secrets
+# Edit .kamal/secrets with your credentials
+
+# Set environment variables
+export KAMAL_SERVER_IP="your.server.ip"
+export KAMAL_REGISTRY_USERNAME="your-github-username"
+
+# First-time setup (installs Docker, configures proxy)
+make kamal-setup
+
+# Deploy updates
+make kamal-deploy
+
+# View logs
+make kamal-logs
+```
+
+See `config/deploy.yml` for full configuration options.
 
 ## Development
 

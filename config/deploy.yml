@@ -1,0 +1,80 @@
+# Kamal 2.9+ deployment configuration for Claude Code API
+# Docs: https://kamal-deploy.org/docs/configuration/overview/
+
+# Service identification
+service: claude-code-api
+
+# Docker image (pushed to registry)
+image: <%= ENV['KAMAL_REGISTRY_SERVER'] || 'ghcr.io' %>/<%= ENV['KAMAL_REGISTRY_USERNAME'] %>/claude-code-api
+
+# Target servers
+servers:
+  web:
+    hosts:
+      - <%= ENV['KAMAL_SERVER_IP'] %>
+    options:
+      # Mount volume for Claude CLI data (debug logs, cache)
+      volume:
+        - claude-code-data:/home/appuser/.claude
+
+# Docker registry (GitHub Container Registry)
+registry:
+  server: <%= ENV['KAMAL_REGISTRY_SERVER'] || 'ghcr.io' %>
+  username: <%= ENV['KAMAL_REGISTRY_USERNAME'] %>
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# Kamal proxy configuration
+proxy:
+  # Application port inside container
+  app_port: 8000
+  # Healthcheck configuration
+  healthcheck:
+    interval: 10
+    path: /health
+    timeout: 5
+  # SSL configuration (set to true for production with domain)
+  ssl: <%= ENV['KAMAL_SSL'] || 'false' %>
+  # Host configuration (optional, for routing)
+  # host: api.example.com
+
+# Builder configuration
+builder:
+  # Target architecture
+  arch: amd64
+  # Use local Docker daemon
+  local: true
+  # Build arguments (optional)
+  # args:
+  #   PYTHON_VERSION: 3.12
+
+# Environment variables
+env:
+  # Clear (non-secret) environment variables
+  clear:
+    PYTHONUNBUFFERED: "1"
+    LOG_LEVEL: "info"
+  # Secret environment variables (from .kamal/secrets)
+  secret:
+    - CLAUDE_CODE_OAUTH_TOKEN
+
+# SSH configuration
+ssh:
+  user: <%= ENV['KAMAL_SSH_USER'] || 'root' %>
+  # Optionally specify key if not default
+  # keys: [ "~/.ssh/id_ed25519" ]
+
+# Container settings
+retain_containers: 3
+readiness_delay: 5
+deploy_timeout: 120
+
+# Minimum Kamal version required
+minimum_version: "2.9.0"
+
+# Logging configuration
+logging:
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"

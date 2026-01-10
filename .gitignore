@@ -103,6 +103,10 @@ Desktop.ini
 secrets.json
 credentials.json
 
+# Kamal secrets (keep .kamal/secrets.example)
+.kamal/secrets
+!.kamal/secrets.example
+
 # Local development
 *.local
 .scratch/

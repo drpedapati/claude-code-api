@@ -80,6 +80,61 @@ class HealthResponse(BaseModel):
     version: str = Field(default="0.1.0", description="API version")
 
 
+class ModelInfo(BaseModel):
+    """Information about a Claude model."""
+
+    id: str = Field(..., description="Model identifier (alias for Claude Code CLI)")
+    api_id: str = Field(..., description="Official Anthropic API model ID")
+    name: str = Field(..., description="Human-readable model name")
+    description: str = Field(..., description="Model description")
+    context_window: int = Field(..., description="Context window size in tokens")
+    max_output: int = Field(..., description="Maximum output tokens")
+    input_price: str = Field(..., description="Price per million input tokens")
+    output_price: str = Field(..., description="Price per million output tokens")
+
+
+class ModelsResponse(BaseModel):
+    """Response from models endpoint."""
+
+    models: list[ModelInfo] = Field(..., description="Available models")
+
+
+# Available models - aligned with official Anthropic API
+# See: https://platform.claude.com/docs/en/about-claude/models/overview
+AVAILABLE_MODELS = [
+    ModelInfo(
+        id="haiku",
+        api_id="claude-haiku-4-5-20251001",
+        name="Claude Haiku 4.5",
+        description="Our fastest model with near-frontier intelligence",
+        context_window=200_000,
+        max_output=64_000,
+        input_price="$1",
+        output_price="$5",
+    ),
+    ModelInfo(
+        id="sonnet",
+        api_id="claude-sonnet-4-5-20250929",
+        name="Claude Sonnet 4.5",
+        description="Our smart model for complex agents and coding",
+        context_window=200_000,
+        max_output=64_000,
+        input_price="$3",
+        output_price="$15",
+    ),
+    ModelInfo(
+        id="opus",
+        api_id="claude-opus-4-5-20251101",
+        name="Claude Opus 4.5",
+        description="Premium model combining maximum intelligence with practical performance",
+        context_window=200_000,
+        max_output=64_000,
+        input_price="$5",
+        output_price="$25",
+    ),
+]
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -93,6 +148,16 @@ def health_check():
     Returns basic service information for load balancers and monitoring.
     """
     return HealthResponse()
+
+
+@app.get("/llm/models", response_model=ModelsResponse, tags=["LLM"])
+def llm_models():
+    """
+    List available Claude models.
+
+    Returns the models that can be used with the chat and json endpoints.
+    """
+    return ModelsResponse(models=AVAILABLE_MODELS)
 
 
 @app.get("/llm/status", response_model=StatusResponse, tags=["LLM"])

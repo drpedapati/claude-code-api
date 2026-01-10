@@ -3,6 +3,7 @@
 
 .PHONY: help install dev server stop status test test-quick test-full test-gist clean lint format typecheck
 .PHONY: docker-build docker-run docker-stop docker-test docker-logs docker-shell docker-clean
+.PHONY: kamal-setup kamal-deploy kamal-logs kamal-console kamal-rollback kamal-details
 
 # Colors for pretty output
 CYAN := \033[36m
@@ -43,6 +44,14 @@ help:
 	@echo "  $(GREEN)make docker-test$(RESET)  Build and test container"
 	@echo "  $(GREEN)make docker-logs$(RESET)  Tail container logs"
 	@echo "  $(GREEN)make docker-shell$(RESET) Open shell in container"
+	@echo ""
+	@echo "$(BOLD)Kamal Deploy:$(RESET)"
+	@echo "  $(GREEN)make kamal-setup$(RESET)   Initial server setup (first time)"
+	@echo "  $(GREEN)make kamal-deploy$(RESET)  Deploy latest changes"
+	@echo "  $(GREEN)make kamal-logs$(RESET)    Tail production logs"
+	@echo "  $(GREEN)make kamal-console$(RESET) SSH into production container"
+	@echo "  $(GREEN)make kamal-rollback$(RESET) Rollback to previous version"
+	@echo "  $(GREEN)make kamal-details$(RESET) Show deployment details"
 	@echo ""
 	@echo "$(BOLD)Testing:$(RESET)"
 	@echo "  $(GREEN)make test$(RESET)         Run all tests"
@@ -205,6 +214,58 @@ docker-clean:
 	@docker rm $(CONTAINER_NAME) 2>/dev/null || true
 	@docker rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	@echo "$(GREEN)✓ Cleaned$(RESET)"
+
+#───────────────────────────────────────────────────────────────────────────────
+# Kamal Deployment (requires: gem install kamal)
+# Docs: https://kamal-deploy.org/docs/
+#───────────────────────────────────────────────────────────────────────────────
+
+kamal-setup:
+	@echo "$(CYAN)Setting up Kamal on server (first-time deployment)...$(RESET)"
+	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
+	@if ! command -v kamal >/dev/null 2>&1; then \
+		echo "$(RED)Kamal not found. Install with: gem install kamal$(RESET)"; \
+		exit 1; \
+	fi
+	@if [ ! -f .kamal/secrets ]; then \
+		echo "$(YELLOW)⚠ .kamal/secrets not found$(RESET)"; \
+		echo "$(DIM)  Copy .kamal/secrets.example to .kamal/secrets$(RESET)"; \
+		echo "$(DIM)  Fill in KAMAL_REGISTRY_PASSWORD and CLAUDE_CODE_OAUTH_TOKEN$(RESET)"; \
+		exit 1; \
+	fi
+	kamal setup
+	@echo ""
+	@echo "$(GREEN)✓ Kamal setup complete$(RESET)"
+
+kamal-deploy:
+	@echo "$(CYAN)Deploying to production...$(RESET)"
+	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
+	@if ! command -v kamal >/dev/null 2>&1; then \
+		echo "$(RED)Kamal not found. Install with: gem install kamal$(RESET)"; \
+		exit 1; \
+	fi
+	kamal deploy
+	@echo ""
+	@echo "$(GREEN)✓ Deployment complete$(RESET)"
+
+kamal-logs:
+	@echo "$(CYAN)Production logs (Ctrl+C to exit)$(RESET)"
+	@kamal app logs -f 2>/dev/null || echo "$(YELLOW)Could not connect to production$(RESET)"
+
+kamal-console:
+	@echo "$(CYAN)Opening shell in production container...$(RESET)"
+	@kamal app exec -i /bin/bash 2>/dev/null || echo "$(YELLOW)Could not connect to production$(RESET)"
+
+kamal-rollback:
+	@echo "$(CYAN)Rolling back to previous version...$(RESET)"
+	@kamal rollback
+	@echo "$(GREEN)✓ Rollback complete$(RESET)"
+
+kamal-details:
+	@echo ""
+	@echo "$(BOLD)Kamal Deployment Details$(RESET)"
+	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
+	@kamal details 2>/dev/null || echo "$(YELLOW)Could not fetch details$(RESET)"
 
 #───────────────────────────────────────────────────────────────────────────────
 # Testing (using uv run)
