@@ -41,6 +41,13 @@ server = [
     "uvicorn[standard]>=0.23.0",
 ]
 
+# Examples dependencies (streaming web chat)
+examples = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "sse-starlette>=1.6.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=7.0.0",
@@ -52,7 +59,7 @@ dev = [
 
 # All dependencies
 all = [
-    "claude-code-api[server,dev]",
+    "claude-code-api[server,examples,dev]",
 ]
 
 [project.scripts]
