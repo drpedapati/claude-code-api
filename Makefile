@@ -1,5 +1,5 @@
 # Claude Code API - Makefile
-# Beautiful CLI for development and testing
+# Beautiful CLI for development and testing (using uv)
 
 .PHONY: help install dev server stop status test test-quick test-full test-gist clean lint format typecheck
 
@@ -22,7 +22,7 @@ PID_FILE := .server.pid
 
 help:
 	@echo ""
-	@echo "$(BOLD)$(CYAN)Claude Code API$(RESET)"
+	@echo "$(BOLD)$(CYAN)Claude Code API$(RESET) $(DIM)(using uv)$(RESET)"
 	@echo "$(DIM)─────────────────────────────────────────────────────────────$(RESET)"
 	@echo ""
 	@echo "$(BOLD)Server Commands:$(RESET)"
@@ -46,16 +46,16 @@ help:
 	@echo ""
 
 #───────────────────────────────────────────────────────────────────────────────
-# Installation
+# Installation (using uv)
 #───────────────────────────────────────────────────────────────────────────────
 
 install:
-	@echo "$(CYAN)Installing claude-code-api...$(RESET)"
-	pip3 install -e .
+	@echo "$(CYAN)Installing claude-code-api with uv...$(RESET)"
+	uv pip install -e .
 
 dev:
 	@echo "$(CYAN)Installing with all dependencies...$(RESET)"
-	pip3 install -e ".[all]"
+	uv pip install -e ".[all]"
 
 #───────────────────────────────────────────────────────────────────────────────
 # Server Management
@@ -66,9 +66,9 @@ server:
 	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
 		echo "$(YELLOW)Server already running (PID: $$(cat $(PID_FILE)))$(RESET)"; \
 	else \
-		uvicorn claude_code_api.server:app --host 0.0.0.0 --port $(PORT) & \
+		uv run uvicorn claude_code_api.server:app --host 0.0.0.0 --port $(PORT) & \
 		echo $$! > $(PID_FILE); \
-		sleep 1; \
+		sleep 2; \
 		echo "$(GREEN)Server started (PID: $$(cat $(PID_FILE)))$(RESET)"; \
 		echo "$(DIM)API docs: http://localhost:$(PORT)/docs$(RESET)"; \
 	fi
@@ -105,39 +105,39 @@ logs:
 	@tail -f /tmp/claude-code-api.log 2>/dev/null || echo "$(YELLOW)No log file found$(RESET)"
 
 #───────────────────────────────────────────────────────────────────────────────
-# Testing
+# Testing (using uv run)
 #───────────────────────────────────────────────────────────────────────────────
 
 test:
 	@echo "$(CYAN)Running all tests...$(RESET)"
-	pytest -v
+	uv run pytest -v
 
 test-quick:
 	@echo "$(CYAN)Running unit tests (no CLI required)...$(RESET)"
-	pytest -v -m "not integration"
+	uv run pytest -v -m "not integration"
 
 test-full:
 	@echo "$(CYAN)Running full test suite with integration tests...$(RESET)"
-	pytest -v -m "integration"
+	uv run pytest -v -m "integration"
 
 test-gist:
-	@PYTHONPATH=. python3 scripts/test_sdk_spec.py
+	@uv run python scripts/test_sdk_spec.py
 
 #───────────────────────────────────────────────────────────────────────────────
-# Code Quality
+# Code Quality (using uv run)
 #───────────────────────────────────────────────────────────────────────────────
 
 lint:
 	@echo "$(CYAN)Running linter...$(RESET)"
-	ruff check .
+	uv run ruff check .
 
 format:
 	@echo "$(CYAN)Formatting code...$(RESET)"
-	ruff format .
+	uv run ruff format .
 
 typecheck:
 	@echo "$(CYAN)Running type checker...$(RESET)"
-	mypy claude_code_api
+	uv run mypy claude_code_api
 
 #───────────────────────────────────────────────────────────────────────────────
 # Cleanup
