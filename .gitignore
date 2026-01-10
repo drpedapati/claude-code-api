@@ -107,6 +107,10 @@ credentials.json
 .kamal/secrets
 !.kamal/secrets.example
 
+# API keys (keep .api-keys.example)
+.api-keys
+!.api-keys.example
+
 # Local development
 *.local
 *.pid

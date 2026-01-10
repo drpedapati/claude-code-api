@@ -5,6 +5,7 @@
 .PHONY: docker-build docker-run docker-stop docker-test docker-logs docker-shell docker-clean
 .PHONY: kamal-setup kamal-deploy kamal-logs kamal-console kamal-rollback kamal-details
 .PHONY: chat chat-web chat-web-stop
+.PHONY: api-key-create api-key-list api-key-revoke api-key-rotate
 
 # Colors for pretty output
 CYAN := \033[36m
@@ -60,6 +61,12 @@ help:
 	@echo "  $(GREEN)make chat$(RESET)         Interactive terminal chat"
 	@echo "  $(GREEN)make chat-web$(RESET)     Start web chat (port $(CHAT_PORT))"
 	@echo "  $(GREEN)make chat-web-stop$(RESET) Stop web chat server"
+	@echo ""
+	@echo "$(BOLD)API Keys:$(RESET)"
+	@echo "  $(GREEN)make api-key-create$(RESET)  Create new API key"
+	@echo "  $(GREEN)make api-key-list$(RESET)    List all API keys"
+	@echo "  $(GREEN)make api-key-revoke$(RESET)  Revoke a key (HASH=...)"
+	@echo "  $(GREEN)make api-key-rotate$(RESET)  Rotate a key (HASH=...)"
 	@echo ""
 	@echo "$(BOLD)Testing:$(RESET)"
 	@echo "  $(GREEN)make test$(RESET)         Run all tests"
@@ -162,7 +169,7 @@ docker-run:
 		fi; \
 		docker run -d \
 			--name $(CONTAINER_NAME) \
-			-p $(PORT):8000 \
+			-p $(PORT):7742 \
 			-v claude-code-data:/home/appuser/.claude \
 			-e CLAUDE_CODE_OAUTH_TOKEN=$${CLAUDE_CODE_OAUTH_TOKEN:-} \
 			$(IMAGE_NAME):$(IMAGE_TAG); \
@@ -184,7 +191,7 @@ docker-test: docker-build
 	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
 	@# Start container
 	@docker rm -f $(CONTAINER_NAME)-test 2>/dev/null || true
-	@docker run -d --name $(CONTAINER_NAME)-test -p 8888:8000 $(IMAGE_NAME):$(IMAGE_TAG)
+	@docker run -d --name $(CONTAINER_NAME)-test -p 8888:7742 $(IMAGE_NAME):$(IMAGE_TAG)
 	@sleep 3
 	@# Health check
 	@echo -n "  Health check: "
@@ -347,6 +354,35 @@ format:
 typecheck:
 	@echo "$(CYAN)Running type checker...$(RESET)"
 	uv run mypy claude_code_api
+
+#───────────────────────────────────────────────────────────────────────────────
+# API Key Management
+#───────────────────────────────────────────────────────────────────────────────
+
+api-key-create:
+	@echo "$(CYAN)Creating API key...$(RESET)"
+	@python3 scripts/api_keys.py create $(if $(NAME),--name "$(NAME)",)
+
+api-key-list:
+	@echo "$(CYAN)API Keys$(RESET)"
+	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
+	@python3 scripts/api_keys.py list
+
+api-key-revoke:
+	@if [ -z "$(HASH)" ]; then \
+		echo "$(RED)Usage: make api-key-revoke HASH=<hash-prefix>$(RESET)"; \
+		exit 1; \
+	fi
+	@echo "$(CYAN)Revoking key...$(RESET)"
+	@python3 scripts/api_keys.py revoke $(HASH)
+
+api-key-rotate:
+	@if [ -z "$(HASH)" ]; then \
+		echo "$(RED)Usage: make api-key-rotate HASH=<hash-prefix>$(RESET)"; \
+		exit 1; \
+	fi
+	@echo "$(CYAN)Rotating key...$(RESET)"
+	@python3 scripts/api_keys.py rotate $(HASH) $(if $(NAME),--name "$(NAME)",)
 
 #───────────────────────────────────────────────────────────────────────────────
 # Cleanup

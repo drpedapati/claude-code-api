@@ -40,8 +40,8 @@ proxy:
 
 # Builder configuration
 builder:
-  # Target architecture
-  arch: amd64
+  # Target architecture (arm64 for Apple Silicon VMs)
+  arch: arm64
   # Use local Docker daemon
   local: true
   # Build arguments (optional)
@@ -61,8 +61,8 @@ env:
 # SSH configuration
 ssh:
   user: <%= ENV['KAMAL_SSH_USER'] || 'root' %>
-  # Optionally specify key if not default
-  # keys: [ "~/.ssh/id_ed25519" ]
+  keys:
+    - ~/.ssh/id_ed25519
 
 # Container settings
 retain_containers: 3

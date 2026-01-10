@@ -15,9 +15,10 @@ Run with:
 import shutil
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from .auth import verify_api_key
 from .client import ClaudeClient
 
 app = FastAPI(
@@ -162,7 +163,7 @@ def llm_models():
 
 
 @app.get("/llm/status", response_model=StatusResponse, tags=["LLM"])
-def llm_status():
+def llm_status(_: Optional[str] = Depends(verify_api_key)):
     """
     Check if the Claude CLI binary is available.
 
@@ -197,7 +198,7 @@ def llm_status():
 
 
 @app.post("/llm/chat", response_model=ChatResponse, tags=["LLM"])
-def llm_chat(request: ChatRequest):
+def llm_chat(request: ChatRequest, _: Optional[str] = Depends(verify_api_key)):
     """
     Send a prompt to Claude and get a text response.
 
@@ -238,7 +239,7 @@ def llm_chat(request: ChatRequest):
 
 
 @app.post("/llm/json", tags=["LLM"])
-def llm_json(request: ChatRequest):
+def llm_json(request: ChatRequest, _: Optional[str] = Depends(verify_api_key)):
     """
     Send a prompt to Claude and get a parsed JSON response.
 

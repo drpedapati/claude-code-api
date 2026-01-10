@@ -1,0 +1,12 @@
+# Claude Code API Keys (SHA256 hashes)
+# Format: hash|name|created
+#
+# Create keys with: make api-key-create NAME=myapp
+# List keys with:   make api-key-list
+# Revoke with:      make api-key-revoke HASH=5d41
+#
+# Copy this file to .api-keys and add your key hashes.
+# The actual API keys are shown only once when created.
+#
+# Example entry:
+# 5d41402abc4b2a76b9719d911017c592|production|2024-01-10 12:00

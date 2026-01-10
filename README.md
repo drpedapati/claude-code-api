@@ -5,41 +5,46 @@
 
 A Python wrapper and HTTP API for the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
 
-This library provides convenient access to Claude models through the Claude Code binary, enabling LLM inference in Python applications without direct API key management. Authentication is handled automatically via Claude Code's OAuth flow.
+Access Claude models through the Claude Code binary without direct API key management. Authentication is handled automatically via Claude Code's OAuth flow.
+
+## Quick Start
+
+```sh
+# Install Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+claude auth login
+
+# Clone and run
+git clone https://github.com/drpedapati/claude-code-api.git
+cd claude-code-api
+make server
+
+# Test it
+curl http://localhost:7742/health
+curl -X POST http://localhost:7742/llm/chat \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "What is 2+2?", "model": "haiku"}'
+```
 
 ## Installation
 
-### Prerequisites
-
-Claude Code CLI must be installed and authenticated:
+### From Source (Recommended)
 
 ```sh
-npm install -g @anthropic-ai/claude-code
-claude auth login
-```
+git clone https://github.com/drpedapati/claude-code-api.git
+cd claude-code-api
 
-### From PyPI (coming soon)
+# Using uv (fast)
+uv sync
 
-```sh
-pip install claude-code-api
+# Or pip
+pip install -e ".[all]"
 ```
 
 ### From GitHub
 
 ```sh
-# Core library only
 pip install git+https://github.com/drpedapati/claude-code-api.git
-
-# With HTTP server support
-pip install "git+https://github.com/drpedapati/claude-code-api.git#egg=claude-code-api[server]"
-```
-
-### From Source
-
-```sh
-git clone https://github.com/drpedapati/claude-code-api.git
-cd claude-code-api
-pip install -e ".[all]"
 ```
 
 ## Usage
@@ -56,47 +61,25 @@ client = ClaudeClient(model="haiku")
 result = client.chat("What is the capital of France?")
 print(result.text)  # "Paris"
 
-# With system prompt
-result = client.chat(
-    "Translate to Spanish: Hello, how are you?",
-    system="You are a translator. Return only the translation, nothing else."
-)
-print(result.text)  # "Hola, ¿cómo estás?"
-
 # Get structured JSON response
 data = client.chat_json(
     "What are the first 5 prime numbers?",
     system="Return JSON: {primes: [numbers]}"
 )
 print(data["primes"])  # [2, 3, 5, 7, 11]
-```
 
-#### Convenience Functions
-
-For quick, one-off queries:
-
-```python
-from claude_code_api import claude_chat, claude_json
-
-# Simple text response
+# Convenience functions for one-off queries
 response = claude_chat("What is 2+2?")
-
-# JSON response
-data = claude_json(
-    "List 3 primary colors",
-    system="Return JSON: {colors: [strings]}"
-)
+data = claude_json("List 3 colors", system="Return JSON: {colors: [strings]}")
 ```
 
 ### HTTP Server
 
-Start the server:
-
 ```sh
-# Using the CLI entry point
-claude-code-api
+# Start server (port 7742)
+make server
 
-# Or with uvicorn directly
+# Or directly
 uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 ```
 
@@ -104,151 +87,138 @@ uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check for load balancers |
-| `GET` | `/llm/status` | Verify Claude CLI availability |
-| `GET` | `/llm/models` | List available models with pricing |
-| `POST` | `/llm/chat` | Send prompt, receive text response |
-| `POST` | `/llm/json` | Send prompt, receive parsed JSON |
+| `GET` | `/health` | Health check |
+| `GET` | `/llm/status` | Claude CLI availability |
+| `GET` | `/llm/models` | List available models |
+| `POST` | `/llm/chat` | Text response |
+| `POST` | `/llm/json` | JSON response |
 
 #### Example Requests
 
 ```sh
 # Health check
 curl http://localhost:7742/health
+# {"status":"ok","service":"claude-code-api","version":"0.1.0"}
 
-# Chat request
+# Chat
 curl -X POST http://localhost:7742/llm/chat \
   -H "Content-Type: application/json" \
   -d '{"prompt": "What is 2+2?", "model": "haiku"}'
+# {"text":"4","model":"haiku","is_error":false}
 
 # JSON response
 curl -X POST http://localhost:7742/llm/json \
   -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "List 3 colors",
-    "system": "Return JSON: {colors: [strings]}",
-    "model": "haiku"
-  }'
+  -d '{"prompt": "List 3 colors", "system": "Return JSON only: {colors: [strings]}", "model": "haiku"}'
+# {"colors":["red","blue","green"]}
 ```
 
-API documentation is available at:
-- **Swagger UI**: http://localhost:7742/docs
-- **ReDoc**: http://localhost:7742/redoc
+**API Docs**: http://localhost:7742/docs
 
 ## Models
 
-| Model | API ID | Description | Pricing (per MTok) |
-|-------|--------|-------------|-------------------|
-| `haiku` | `claude-haiku-4-5-20251001` | Our fastest model with near-frontier intelligence | $1 / $5 |
-| `sonnet` | `claude-sonnet-4-5-20250929` | Our smart model for complex agents and coding | $3 / $15 |
-| `opus` | `claude-opus-4-5-20251101` | Premium model combining maximum intelligence with practical performance | $5 / $25 |
+| Model | API ID | Speed | Pricing (MTok) |
+|-------|--------|-------|----------------|
+| `haiku` | `claude-haiku-4-5-20251001` | Fastest | $1 / $5 |
+| `sonnet` | `claude-sonnet-4-5-20250929` | Balanced | $3 / $15 |
+| `opus` | `claude-opus-4-5-20251101` | Most capable | $5 / $25 |
 
-See [Anthropic Models Overview](https://platform.claude.com/docs/en/about-claude/models/overview) for full details.
+## API Key Security
 
-## Configuration
+Protect your API with simple key-based authentication.
 
-The Claude Code CLI handles all authentication automatically:
-
-1. **OAuth (recommended)**: Run `claude auth login` once to authenticate via browser
-2. **API Key fallback**: Set `ANTHROPIC_API_KEY` environment variable
-
-> [!NOTE]
-> This library automatically removes `ANTHROPIC_API_KEY` from the subprocess environment when calling the CLI. This prevents conflicts between API key authentication and Claude Code's OAuth flow.
-
-## API Reference
-
-### ClaudeClient
-
-```python
-ClaudeClient(
-    model: str = "haiku",      # Model: haiku, sonnet, opus
-    max_turns: int = 1,        # Conversation turns (1 for single-shot)
-    binary_path: str = None    # Path to claude binary (auto-detected)
-)
-```
-
-#### Methods
-
-**`chat(prompt, system=None) -> ClaudeResult`**
-
-Send a prompt and receive a response.
-
-```python
-result = client.chat("Hello!")
-print(result.text)       # Response text
-print(result.model)      # Model used
-print(result.is_error)   # True if error occurred
-```
-
-**`chat_json(prompt, system=None) -> dict`**
-
-Send a prompt and receive a parsed JSON response.
-
-```python
-data = client.chat_json(
-    "What is 2+2?",
-    system="Return JSON: {answer: number}"
-)
-# Returns: {"answer": 4}
-```
-
-Raises `ValueError` if the response cannot be parsed as JSON.
-
-### ClaudeResult
-
-```python
-@dataclass
-class ClaudeResult:
-    text: str                    # Response text
-    model: str                   # Model used
-    is_error: bool = False       # Whether an error occurred
-    error_message: str = None    # Error details if is_error is True
-```
-
-## Error Handling
-
-```python
-from claude_code_api import ClaudeClient
-
-client = ClaudeClient()
-
-# Check for errors in result
-result = client.chat("Hello")
-if result.is_error:
-    print(f"Error: {result.error_message}")
-else:
-    print(result.text)
-
-# JSON parsing errors raise ValueError
-try:
-    data = client.chat_json("Write a poem")  # Not JSON!
-except ValueError as e:
-    print(f"Could not parse JSON: {e}")
-
-# CLI errors raise RuntimeError
-try:
-    data = client.chat_json("Hello")
-except RuntimeError as e:
-    print(f"Claude CLI error: {e}")
-```
-
-## Deployment
-
-### Docker
+### Create & Manage Keys
 
 ```sh
-# Build and run locally
+# Create a new API key
+make api-key-create NAME=myapp
+# Shows: cca_a1b2c3d4... (save this!)
+
+# List all keys (shows hashes only)
+make api-key-list
+
+# Revoke a key
+make api-key-revoke HASH=5d41
+
+# Rotate (revoke + create new)
+make api-key-rotate HASH=5d41 NAME=myapp-v2
+```
+
+### Using Keys
+
+```sh
+# With curl
+curl -H "Authorization: Bearer cca_your_key_here" \
+  http://localhost:7742/llm/chat \
+  -d '{"prompt": "Hello"}'
+
+# Without key (when .api-keys exists)
+# Returns: 401 Unauthorized
+```
+
+### How It Works
+
+- Keys are `cca_` prefix + 32 random hex chars
+- Only SHA256 hashes are stored in `.api-keys`
+- If `.api-keys` doesn't exist, auth is disabled
+- `/health` and `/docs` are always public
+
+### Docker/Production
+
+```sh
+# Mount keys file
+docker run -v $(pwd)/.api-keys:/app/.api-keys ...
+
+# Or via environment (comma-separated hashes)
+API_KEY_HASHES="hash1,hash2" make docker-run
+
+# Disable auth entirely
+API_AUTH_DISABLED=1 make docker-run
+```
+
+## Streaming Examples
+
+Interactive streaming chat demos are included:
+
+```sh
+# Terminal chat with real-time streaming
+make chat
+
+# Web chat with SSE (opens on port 7743)
+make chat-web
+make chat-web-stop
+```
+
+The examples demonstrate:
+- Real-time token streaming via `--include-partial-messages`
+- Async subprocess handling for web servers
+- Server-Sent Events (SSE) for browser streaming
+
+## Docker
+
+```sh
+# Build and run
 make docker-build
 make docker-run
 
 # With OAuth token (for authenticated requests)
-source .env.local
-CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" make docker-run
+export CLAUDE_CODE_OAUTH_TOKEN="your-token"  # from: claude setup-token
+make docker-run
+
+# Test container
+make docker-test
 ```
 
-### Kamal (Production)
+The container:
+- Runs on port 7742
+- Persists Claude data in `claude-code-data` volume
+- Includes Claude Code CLI pre-installed
 
-This project includes [Kamal 2.9+](https://kamal-deploy.org/) configuration for production deployment.
+## Production Deployment (Kamal)
+
+Deploy to any server with [Kamal 2.9+](https://kamal-deploy.org/).
+
+### Setup
 
 ```sh
 # Install Kamal
@@ -256,13 +226,18 @@ gem install kamal
 
 # Configure secrets
 cp .kamal/secrets.example .kamal/secrets
-# Edit .kamal/secrets with your credentials
+# Edit with: KAMAL_REGISTRY_PASSWORD, CLAUDE_CODE_OAUTH_TOKEN
 
-# Set environment variables
+# Set environment
 export KAMAL_SERVER_IP="your.server.ip"
 export KAMAL_REGISTRY_USERNAME="your-github-username"
+export KAMAL_SSH_USER="your-ssh-user"
+```
 
-# First-time setup (installs Docker, configures proxy)
+### Deploy
+
+```sh
+# First time (installs Docker, proxy, etc.)
 make kamal-setup
 
 # Deploy updates
@@ -270,33 +245,63 @@ make kamal-deploy
 
 # View logs
 make kamal-logs
+
+# Rollback
+make kamal-rollback
 ```
 
-See `config/deploy.yml` for full configuration options.
+### Architecture Notes
+
+- **ARM64 VMs**: Set `arch: arm64` in `config/deploy.yml` for Apple Silicon
+- **SSL**: Enable via `ssl: true` in proxy config when using a domain
+- **Secrets**: Stored in `.kamal/secrets` (gitignored)
 
 ## Development
 
 ```sh
-# Clone and install with dev dependencies
-git clone https://github.com/drpedapati/claude-code-api.git
-cd claude-code-api
-pip install -e ".[dev]"
+# Install with dev dependencies
+make dev
 
 # Run tests
-pytest
+make test           # All tests
+make test-quick     # Unit tests only (no CLI)
+make test-gist      # SDK spec tests
 
-# Run tests (skip integration tests requiring CLI)
-pytest -m "not integration"
+# Code quality
+make lint           # Check code
+make format         # Format code
+make typecheck      # Type check
 
-# Format code
-ruff format .
-
-# Lint
-ruff check .
-
-# Type check
-mypy claude_code_api
+# Status
+make status         # Check server status
+make help           # All commands
 ```
+
+## Makefile Commands
+
+| Command | Description |
+|---------|-------------|
+| `make server` | Start API server (port 7742) |
+| `make stop` | Stop server |
+| `make chat` | Interactive terminal chat |
+| `make chat-web` | Web chat (port 7743) |
+| `make api-key-create` | Create new API key |
+| `make api-key-list` | List API keys |
+| `make api-key-revoke` | Revoke a key |
+| `make docker-build` | Build Docker image |
+| `make docker-run` | Run container |
+| `make kamal-deploy` | Deploy to production |
+| `make test` | Run all tests |
+| `make help` | Show all commands |
+
+## Configuration
+
+Authentication is automatic via Claude Code:
+
+1. **OAuth (recommended)**: `claude auth login` (one-time browser auth)
+2. **Token (Docker/CI)**: `claude setup-token` to generate OAuth token
+
+> **Note**: `ANTHROPIC_API_KEY` is automatically removed from the subprocess environment to prevent conflicts with Claude Code's OAuth flow.
 
 ## Requirements
 
@@ -311,4 +316,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code)
 - [Anthropic API Reference](https://docs.anthropic.com/en/api)
-- [anthropic-sdk-python](https://github.com/anthropics/anthropic-sdk-python)
+- [Kamal Deployment](https://kamal-deploy.org/)
