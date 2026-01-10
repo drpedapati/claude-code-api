@@ -2,20 +2,25 @@
 FastAPI server exposing Claude Code as an HTTP API.
 
 Endpoints:
-    GET  /health          - Health check
-    GET  /llm/status      - Check if Claude CLI is available
-    GET  /llm/models      - List available models
-    POST /llm/chat        - Send a prompt, get text response
-    POST /llm/json        - Send a prompt, get JSON response
+    GET  /health             - Health check
+    GET  /llm/status         - Check if Claude CLI is available
+    GET  /llm/models         - List available models
+    POST /llm/chat           - Send a prompt, get text response
+    POST /llm/chat/stream    - Send a prompt, get streaming response (SSE)
+    POST /llm/json           - Send a prompt, get JSON response
 
 Run with:
     uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 """
 
+import asyncio
+import json
+import os
 import shutil
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .auth import verify_api_key
@@ -236,6 +241,142 @@ def llm_chat(request: ChatRequest, _: Optional[str] = Depends(verify_api_key)):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+async def stream_chat_response(
+    prompt: str,
+    model: str = "haiku",
+    system: Optional[str] = None,
+    max_turns: int = 1,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream chat response from Claude CLI using SSE format.
+
+    Yields Server-Sent Events with token-level streaming.
+    """
+    binary_path = shutil.which("claude")
+    if not binary_path:
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Claude CLI not found'})}\n\n"
+        return
+
+    cmd = [
+        "claude",
+        "-p",
+        "--output-format", "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "--model", model,
+        "--max-turns", str(max_turns),
+    ]
+
+    if system:
+        cmd.extend(["--system-prompt", system])
+
+    cmd.extend(["--", prompt])
+
+    # Remove ANTHROPIC_API_KEY to force CLI auth
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env["PYTHONUNBUFFERED"] = "1"
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+
+    yield f"data: {json.dumps({'type': 'start'})}\n\n"
+
+    has_streamed = False
+
+    try:
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+
+            line = line.decode().strip()
+            if not line:
+                continue
+
+            try:
+                msg = json.loads(line)
+                msg_type = msg.get("type")
+
+                if msg_type == "stream_event":
+                    event = msg.get("event", {})
+                    event_type = event.get("type")
+
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
+                            if text:
+                                has_streamed = True
+                                yield f"data: {json.dumps({'type': 'chunk', 'text': text})}\n\n"
+
+                elif msg_type == "result" and not has_streamed:
+                    result_text = msg.get("result", "")
+                    if result_text:
+                        yield f"data: {json.dumps({'type': 'chunk', 'text': result_text})}\n\n"
+
+            except json.JSONDecodeError:
+                continue
+
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    finally:
+        await process.wait()
+        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+
+
+@app.post("/llm/chat/stream", tags=["LLM"])
+async def llm_chat_stream(request: ChatRequest, _: Optional[str] = Depends(verify_api_key)):
+    """
+    Send a prompt to Claude and get a streaming response.
+
+    Returns Server-Sent Events (SSE) with token-level streaming.
+    Each event contains a JSON object with type and data.
+
+    **Event Types:**
+    - `start`: Stream started
+    - `chunk`: Text chunk (has `text` field)
+    - `end`: Stream complete
+    - `error`: Error occurred (has `message` field)
+
+    **Example Usage (curl):**
+    ```bash
+    curl -N -X POST http://localhost:7742/llm/chat/stream \\
+      -H "Content-Type: application/json" \\
+      -d '{"prompt": "Tell me a short story", "model": "haiku"}'
+    ```
+
+    **Example Events:**
+    ```
+    data: {"type": "start"}
+    data: {"type": "chunk", "text": "Once"}
+    data: {"type": "chunk", "text": " upon"}
+    data: {"type": "chunk", "text": " a"}
+    data: {"type": "chunk", "text": " time"}
+    data: {"type": "end"}
+    ```
+    """
+    return StreamingResponse(
+        stream_chat_response(
+            prompt=request.prompt,
+            model=request.model,
+            system=request.system,
+            max_turns=request.max_turns,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/llm/json", tags=["LLM"])

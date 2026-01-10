@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Web Chat Example for Claude Code API
+Streaming Web Chat Example for Claude Code API
 
-A simple web-based chat application that connects to the Claude Code API.
-Demonstrates using the API from a web frontend.
+A web-based chat application with real-time streaming responses
+using the Claude Code API's streaming endpoint.
 
 Usage:
     # First start the API server
@@ -18,20 +18,20 @@ Requirements:
     - Claude Code API server running on port 7742
 """
 
+import json
 import os
-from typing import Optional
 
 try:
     import httpx
 except ImportError:
     raise ImportError("httpx required. Install with: pip install httpx")
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 app = FastAPI(
-    title="Claude Web Chat",
-    description="Web-based chat using Claude Code API",
+    title="Claude Streaming Web Chat",
+    description="Web-based streaming chat using Claude Code API",
     version="1.0.0",
 )
 
@@ -47,7 +47,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Web Chat</title>
+    <title>Claude Streaming Chat</title>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -61,11 +61,7 @@ HTML_TEMPLATE = """
             --border: #334155;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -85,10 +81,7 @@ HTML_TEMPLATE = """
             gap: 1rem;
         }
 
-        .header h1 {
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
+        .header h1 { font-size: 1.25rem; font-weight: 600; }
 
         .header select {
             background: var(--bg-primary);
@@ -106,13 +99,8 @@ HTML_TEMPLATE = """
             color: var(--text-secondary);
         }
 
-        .header .api-status.connected {
-            color: var(--accent);
-        }
-
-        .header .api-status.error {
-            color: #ef4444;
-        }
+        .header .api-status.connected { color: var(--accent); }
+        .header .api-status.error { color: #ef4444; }
 
         .chat-container {
             flex: 1;
@@ -154,13 +142,9 @@ HTML_TEMPLATE = """
             letter-spacing: 0.05em;
         }
 
-        .message.error {
-            border-color: #ef4444;
-        }
-
-        .message.error .label {
-            color: #ef4444;
-        }
+        .message.streaming { border-color: var(--accent); }
+        .message.error { border-color: #ef4444; }
+        .message.error .label { color: #ef4444; }
 
         .input-container {
             padding: 1rem 1.5rem;
@@ -188,10 +172,7 @@ HTML_TEMPLATE = """
             max-height: 150px;
         }
 
-        #userInput:focus {
-            outline: none;
-            border-color: var(--accent);
-        }
+        #userInput:focus { outline: none; border-color: var(--accent); }
 
         #sendBtn {
             background: var(--accent);
@@ -205,36 +186,8 @@ HTML_TEMPLATE = """
             transition: background 0.2s;
         }
 
-        #sendBtn:hover:not(:disabled) {
-            background: var(--accent-hover);
-        }
-
-        #sendBtn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .typing-indicator {
-            display: inline-flex;
-            gap: 0.25rem;
-            padding: 0.25rem 0;
-        }
-
-        .typing-indicator span {
-            width: 8px;
-            height: 8px;
-            background: var(--accent);
-            border-radius: 50%;
-            animation: bounce 1.4s infinite ease-in-out;
-        }
-
-        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
-        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
-
-        @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
-        }
+        #sendBtn:hover:not(:disabled) { background: var(--accent-hover); }
+        #sendBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .empty-state {
             text-align: center;
@@ -251,7 +204,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="header">
-        <h1>Claude Web Chat</h1>
+        <h1>Claude Streaming Chat</h1>
         <select id="modelSelect">
             <option value="haiku">Haiku (Fast)</option>
             <option value="sonnet">Sonnet (Balanced)</option>
@@ -269,11 +222,7 @@ HTML_TEMPLATE = """
 
     <div class="input-container">
         <div class="input-wrapper">
-            <textarea
-                id="userInput"
-                placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
-                rows="1"
-            ></textarea>
+            <textarea id="userInput" placeholder="Type your message... (Enter to send)" rows="1"></textarea>
             <button id="sendBtn">Send</button>
         </div>
     </div>
@@ -285,9 +234,8 @@ HTML_TEMPLATE = """
         const modelSelect = document.getElementById('modelSelect');
         const apiStatus = document.getElementById('apiStatus');
 
-        let isProcessing = false;
+        let isStreaming = false;
 
-        // Check API status on load
         async function checkApiStatus() {
             try {
                 const response = await fetch('/api/health');
@@ -306,16 +254,22 @@ HTML_TEMPLATE = """
         }
         checkApiStatus();
 
-        function addMessage(content, type, isError = false) {
-            // Remove empty state if present
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function addMessage(content, type, isStreaming = false) {
             const emptyState = chatContainer.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
 
             const div = document.createElement('div');
-            div.className = `message ${type}` + (isError ? ' error' : '');
+            div.className = `message ${type}` + (isStreaming ? ' streaming' : '');
 
             if (type === 'claude') {
-                div.innerHTML = `<div class="label">${isError ? 'Error' : 'Claude'}</div><div class="content">${escapeHtml(content)}</div>`;
+                div.innerHTML = `<div class="label">Claude</div><div class="content"></div>`;
+                div.querySelector('.content').textContent = content;
             } else {
                 div.textContent = content;
             }
@@ -325,75 +279,79 @@ HTML_TEMPLATE = """
             return div;
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function showTypingIndicator() {
-            const div = document.createElement('div');
-            div.className = 'message claude';
-            div.id = 'typingIndicator';
-            div.innerHTML = `
-                <div class="label">Claude</div>
-                <div class="typing-indicator">
-                    <span></span><span></span><span></span>
-                </div>
-            `;
-            chatContainer.appendChild(div);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-
-        function removeTypingIndicator() {
-            const indicator = document.getElementById('typingIndicator');
-            if (indicator) indicator.remove();
-        }
-
         async function sendMessage() {
             const message = userInput.value.trim();
-            if (!message || isProcessing) return;
+            if (!message || isStreaming) return;
 
-            isProcessing = true;
+            isStreaming = true;
             sendBtn.disabled = true;
             userInput.value = '';
             userInput.style.height = 'auto';
 
-            // Add user message
             addMessage(message, 'user');
 
-            // Show typing indicator
-            showTypingIndicator();
+            const claudeMessage = addMessage('', 'claude', true);
+            const contentEl = claudeMessage.querySelector('.content');
 
             try {
                 const model = modelSelect.value;
-                const response = await fetch('/api/chat', {
+                const response = await fetch('/api/chat/stream', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({prompt: message, model: model})
                 });
 
-                removeTypingIndicator();
-
-                const data = await response.json();
-
-                if (response.ok && !data.is_error) {
-                    addMessage(data.text, 'claude');
-                } else {
-                    addMessage(data.error || data.text || 'Unknown error', 'claude', true);
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Request failed');
                 }
 
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let responseText = '';
+
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, {stream: true});
+                    const lines = chunk.split('\\n');
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+
+                        try {
+                            const data = JSON.parse(line.slice(6));
+
+                            if (data.type === 'chunk') {
+                                responseText += data.text;
+                                contentEl.textContent = responseText;
+                                chatContainer.scrollTop = chatContainer.scrollHeight;
+                            } else if (data.type === 'error') {
+                                throw new Error(data.message);
+                            }
+                        } catch (e) {
+                            if (e.message !== 'Unexpected end of JSON input') {
+                                console.error('Parse error:', e);
+                            }
+                        }
+                    }
+                }
+
+                claudeMessage.classList.remove('streaming');
+
             } catch (error) {
-                removeTypingIndicator();
-                addMessage(`Connection error: ${error.message}`, 'claude', true);
+                claudeMessage.classList.remove('streaming');
+                claudeMessage.classList.add('error');
+                claudeMessage.querySelector('.label').textContent = 'Error';
+                contentEl.textContent = error.message;
             } finally {
-                isProcessing = false;
+                isStreaming = false;
                 sendBtn.disabled = false;
                 userInput.focus();
             }
         }
 
-        // Event listeners
         sendBtn.addEventListener('click', sendMessage);
 
         userInput.addEventListener('keydown', (e) => {
@@ -403,13 +361,11 @@ HTML_TEMPLATE = """
             }
         });
 
-        // Auto-resize textarea
         userInput.addEventListener('input', () => {
             userInput.style.height = 'auto';
             userInput.style.height = Math.min(userInput.scrollHeight, 150) + 'px';
         });
 
-        // Focus input on load
         userInput.focus();
     </script>
 </body>
@@ -436,13 +392,37 @@ async def api_health():
     return {"api_available": False, "api_url": API_URL}
 
 
-@app.post("/api/chat")
-async def chat(request: dict):
-    """
-    Proxy chat request to the Claude Code API.
+async def proxy_stream(prompt: str, model: str, system: str = None):
+    """Proxy streaming response from the API."""
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
 
-    This endpoint forwards requests to the main API server,
-    handling authentication if an API key is configured.
+    payload = {"prompt": prompt, "model": model}
+    if system:
+        payload["system"] = system
+
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            f"{API_URL}/llm/chat/stream",
+            json=payload,
+            headers=headers,
+            timeout=120.0,
+        ) as response:
+            if response.status_code == 401:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'API authentication required'})}\n\n"
+                return
+
+            async for line in response.aiter_lines():
+                if line:
+                    yield f"{line}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: dict):
+    """
+    Proxy streaming chat request to the Claude Code API.
     """
     prompt = request.get("prompt")
     model = request.get("model", "haiku")
@@ -452,35 +432,16 @@ async def chat(request: dict):
         raise HTTPException(status_code=400, detail="prompt is required")
 
     if model not in ("haiku", "sonnet", "opus"):
-        raise HTTPException(status_code=400, detail="Invalid model. Use: haiku, sonnet, opus")
+        raise HTTPException(status_code=400, detail="Invalid model")
 
-    headers = {"Content-Type": "application/json"}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-
-    payload = {"prompt": prompt, "model": model}
-    if system:
-        payload["system"] = system
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{API_URL}/llm/chat",
-                json=payload,
-                headers=headers,
-                timeout=120.0,
-            )
-
-            if response.status_code == 401:
-                return {"is_error": True, "error": "API authentication required. Set CLAUDE_API_KEY environment variable."}
-
-            data = response.json()
-            return data
-
-    except httpx.ConnectError:
-        return {"is_error": True, "error": f"Cannot connect to API at {API_URL}. Is the server running?"}
-    except Exception as e:
-        return {"is_error": True, "error": str(e)}
+    return StreamingResponse(
+        proxy_stream(prompt, model, system),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/health")
@@ -491,5 +452,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=7743)
