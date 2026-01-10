@@ -7,6 +7,10 @@ A Python wrapper and HTTP API for the [Claude Code CLI](https://docs.anthropic.c
 
 Access Claude models through the Claude Code binary without direct API key management. Authentication is handled automatically via Claude Code's OAuth flow.
 
+## Architecture
+
+![Claude Code API Architecture](claude_code_api_architecture.png)
+
 ## Quick Start
 
 ```sh
