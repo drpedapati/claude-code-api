@@ -15,10 +15,10 @@ Requirements:
     - Authenticated: claude auth login
 """
 
+import asyncio
 import json
 import os
 import shutil
-import subprocess
 from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -403,9 +403,9 @@ async def generate_stream(
     system: Optional[str] = None,
 ) -> AsyncGenerator[dict, None]:
     """
-    Generate streaming response from Claude CLI.
+    Generate streaming response from Claude CLI using async subprocess.
 
-    Yields SSE-formatted events with the response chunks.
+    Yields SSE-formatted events with the response chunks in real-time.
     """
     # Check for Claude CLI
     if not shutil.which("claude"):
@@ -434,31 +434,27 @@ async def generate_stream(
     # Start streaming
     yield {"event": "message", "data": json.dumps({"type": "start"})}
 
-    # Use unbuffered output for real-time streaming
+    # Use asyncio subprocess for non-blocking streaming
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=0,  # Unbuffered
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
         env=env,
     )
 
     has_streamed = False
 
     try:
-        # Use readline() for true real-time streaming
+        # Read lines asynchronously for true real-time streaming
         while True:
-            line = process.stdout.readline()
+            line = await process.stdout.readline()
             if not line:
-                if process.poll() is not None:
-                    break
-                continue
+                break
 
-            line = line.strip()
+            line = line.decode().strip()
             if not line:
                 continue
 
@@ -492,7 +488,7 @@ async def generate_stream(
         yield {"event": "message", "data": json.dumps({"type": "error", "message": str(e)})}
 
     finally:
-        process.wait()
+        await process.wait()
         yield {"event": "message", "data": json.dumps({"type": "end"})}
 
 
