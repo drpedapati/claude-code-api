@@ -41,11 +41,11 @@ server = [
     "uvicorn[standard]>=0.23.0",
 ]
 
-# Examples dependencies (streaming web chat)
+# Examples dependencies (chat examples)
 examples = [
+    "httpx>=0.24.0",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
-    "sse-starlette>=1.6.0",
 ]
 
 # Development dependencies
