@@ -94,7 +94,7 @@ class TestConvenienceFunctions:
         """Test claude_json helper."""
         data = claude_json(
             "List 3 primary colors",
-            system='Return JSON: {"colors": ["strings"]}',
+            system='Return ONLY valid JSON, no other text: {"colors": ["string1", "string2", "string3"]}',
         )
         assert isinstance(data, dict)
         assert "colors" in data
