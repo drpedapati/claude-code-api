@@ -91,6 +91,7 @@ uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 | `GET` | `/llm/status` | Claude CLI availability |
 | `GET` | `/llm/models` | List available models |
 | `POST` | `/llm/chat` | Text response |
+| `POST` | `/llm/chat/stream` | Streaming response (SSE) |
 | `POST` | `/llm/json` | JSON response |
 
 #### Example Requests
