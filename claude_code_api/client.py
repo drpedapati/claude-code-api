@@ -118,13 +118,7 @@ class ClaudeClient:
 
         cmd.extend(["--", prompt])
 
-        # Clean environment to avoid conflicts with Claude Code OAuth
-        # If ANTHROPIC_API_KEY is set (e.g., from dotenv), it can conflict
-        # with Claude Code's OAuth authentication
-        env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)
-
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
             error_detail = f"Exit code {result.returncode}"

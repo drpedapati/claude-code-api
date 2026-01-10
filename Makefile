@@ -141,12 +141,14 @@ docker-run:
 		docker run -d \
 			--name $(CONTAINER_NAME) \
 			-p $(PORT):8000 \
-			-v ~/.claude:/home/appuser/.claude:ro \
+			-v claude-code-data:/home/appuser/.claude \
+			-e ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY:-} \
 			$(IMAGE_NAME):$(IMAGE_TAG); \
 		sleep 2; \
 		echo "$(GREEN)✓ Container started$(RESET)"; \
 		echo "$(DIM)  API: http://localhost:$(PORT)$(RESET)"; \
 		echo "$(DIM)  Docs: http://localhost:$(PORT)/docs$(RESET)"; \
+		echo "$(DIM)  Note: Set ANTHROPIC_API_KEY or run 'make docker-shell' and 'claude auth login'$(RESET)"; \
 	fi
 
 docker-stop:

@@ -44,7 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && npm install -g @anthropic-ai/claude-code
 
 # Create non-root user for security
-RUN useradd --create-home --shell /bin/bash appuser
+RUN useradd --create-home --shell /bin/bash appuser \
+    && mkdir -p /home/appuser/.claude \
+    && chown -R appuser:appuser /home/appuser/.claude
 
 WORKDIR /app
 
