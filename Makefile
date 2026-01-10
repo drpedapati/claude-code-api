@@ -4,6 +4,7 @@
 .PHONY: help install dev server stop status test test-quick test-full test-gist clean lint format typecheck
 .PHONY: docker-build docker-run docker-stop docker-test docker-logs docker-shell docker-clean
 .PHONY: kamal-setup kamal-deploy kamal-logs kamal-console kamal-rollback kamal-details
+.PHONY: chat chat-web chat-web-stop
 
 # Colors for pretty output
 CYAN := \033[36m
@@ -17,6 +18,8 @@ RESET := \033[0m
 # Server settings
 PORT := 8000
 PID_FILE := .server.pid
+CHAT_PORT := 8080
+CHAT_PID_FILE := .chat.pid
 
 # Docker settings
 IMAGE_NAME := claude-code-api
@@ -52,6 +55,11 @@ help:
 	@echo "  $(GREEN)make kamal-console$(RESET) SSH into production container"
 	@echo "  $(GREEN)make kamal-rollback$(RESET) Rollback to previous version"
 	@echo "  $(GREEN)make kamal-details$(RESET) Show deployment details"
+	@echo ""
+	@echo "$(BOLD)Examples:$(RESET)"
+	@echo "  $(GREEN)make chat$(RESET)         Interactive terminal chat"
+	@echo "  $(GREEN)make chat-web$(RESET)     Start web chat (port $(CHAT_PORT))"
+	@echo "  $(GREEN)make chat-web-stop$(RESET) Stop web chat server"
 	@echo ""
 	@echo "$(BOLD)Testing:$(RESET)"
 	@echo "  $(GREEN)make test$(RESET)         Run all tests"
@@ -266,6 +274,44 @@ kamal-details:
 	@echo "$(BOLD)Kamal Deployment Details$(RESET)"
 	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
 	@kamal details 2>/dev/null || echo "$(YELLOW)Could not fetch details$(RESET)"
+
+#───────────────────────────────────────────────────────────────────────────────
+# Examples (Streaming Chat)
+#───────────────────────────────────────────────────────────────────────────────
+
+chat:
+	@echo "$(CYAN)Starting interactive chat...$(RESET)"
+	@echo "$(DIM)Type 'quit' to exit$(RESET)"
+	@echo ""
+	@uv run python examples/streaming_chat.py
+
+chat-web:
+	@echo "$(CYAN)Starting web chat server on port $(CHAT_PORT)...$(RESET)"
+	@if [ -f $(CHAT_PID_FILE) ] && kill -0 $$(cat $(CHAT_PID_FILE)) 2>/dev/null; then \
+		echo "$(YELLOW)Web chat already running (PID: $$(cat $(CHAT_PID_FILE)))$(RESET)"; \
+	else \
+		uv sync --extra examples > /dev/null 2>&1; \
+		uv run uvicorn examples.streaming_web_chat:app --host 0.0.0.0 --port $(CHAT_PORT) & \
+		echo $$! > $(CHAT_PID_FILE); \
+		sleep 2; \
+		echo "$(GREEN)✓ Web chat started (PID: $$(cat $(CHAT_PID_FILE)))$(RESET)"; \
+		echo "$(DIM)  Open: http://localhost:$(CHAT_PORT)$(RESET)"; \
+	fi
+
+chat-web-stop:
+	@if [ -f $(CHAT_PID_FILE) ]; then \
+		PID=$$(cat $(CHAT_PID_FILE)); \
+		if kill -0 $$PID 2>/dev/null; then \
+			kill $$PID; \
+			echo "$(GREEN)✓ Web chat stopped (PID: $$PID)$(RESET)"; \
+		else \
+			echo "$(YELLOW)Web chat not running$(RESET)"; \
+		fi; \
+		rm -f $(CHAT_PID_FILE); \
+	else \
+		echo "$(YELLOW)No PID file found$(RESET)"; \
+		pkill -f "uvicorn examples.streaming_web_chat" 2>/dev/null && echo "$(GREEN)Killed orphan process$(RESET)" || echo "$(DIM)No server found$(RESET)"; \
+	fi
 
 #───────────────────────────────────────────────────────────────────────────────
 # Testing (using uv run)
