@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-code-api"
+version = "0.1.0"
+description = "Python wrapper and HTTP API for the Claude Code CLI binary"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Your Name", email = "your@email.com" }
+]
+keywords = [
+    "claude",
+    "anthropic",
+    "llm",
+    "api",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Core dependencies (just the client library)
+dependencies = []
+
+[project.optional-dependencies]
+# Server dependencies (FastAPI)
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+# All dependencies
+all = [
+    "claude-code-api[server,dev]",
+]
+
+[project.scripts]
+claude-code-api = "claude_code_api.server:main"
+
+[project.urls]
+Homepage = "https://github.com/drpedapati/claude-code-api"
+Documentation = "https://github.com/drpedapati/claude-code-api#readme"
+Repository = "https://github.com/drpedapati/claude-code-api"
+Issues = "https://github.com/drpedapati/claude-code-api/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["claude_code_api"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
