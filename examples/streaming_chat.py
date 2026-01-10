@@ -56,12 +56,13 @@ def stream_chat(
         for chunk in stream_chat("Tell me a story"):
             print(chunk, end="", flush=True)
     """
-    # Build command
+    # Build command with --include-partial-messages for token-level streaming
     cmd = [
         "claude",
         "-p",  # Print mode (non-interactive)
         "--output-format",
         "stream-json",
+        "--include-partial-messages",  # Enable token-level streaming
         "--verbose",
         "--model",
         model,
@@ -83,6 +84,9 @@ def stream_chat(
         bufsize=1,  # Line buffered
     )
 
+    # Track if we've yielded any streaming content
+    has_streamed = False
+
     # Stream the output line by line
     try:
         for line in process.stdout:
@@ -94,27 +98,24 @@ def stream_chat(
                 msg = json.loads(line)
                 msg_type = msg.get("type")
 
-                # Handle different message types
-                if msg_type == "assistant":
-                    # Start of assistant response - content is in message.content
-                    content = msg.get("message", {}).get("content", [])
-                    for block in content:
-                        if block.get("type") == "text":
-                            yield block.get("text", "")
+                # Handle stream_event messages (token-level streaming)
+                if msg_type == "stream_event":
+                    event = msg.get("event", {})
+                    event_type = event.get("type")
 
-                elif msg_type == "content_block_delta":
-                    # Streaming text delta
-                    delta = msg.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        yield delta.get("text", "")
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
+                            if text:
+                                has_streamed = True
+                                yield text
 
-                elif msg_type == "result":
-                    # Final result - yield if we haven't streamed yet
+                # Fallback: if no streaming, use the result
+                elif msg_type == "result" and not has_streamed:
                     result_text = msg.get("result", "")
                     if result_text:
-                        # Only yield if this is the final consolidated result
-                        # and we haven't been streaming deltas
-                        pass  # Already yielded via deltas
+                        yield result_text
 
             except json.JSONDecodeError:
                 # Not JSON, might be raw output

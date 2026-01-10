@@ -74,13 +74,19 @@ Both examples require:
 
 ## How Streaming Works
 
-The Claude Code CLI supports streaming via the `--output-format stream-json` flag. The output is a series of JSON lines:
+The Claude Code CLI supports streaming via `--output-format stream-json` combined with `--include-partial-messages` for token-level streaming.
+
+```bash
+claude -p --output-format stream-json --include-partial-messages --verbose -- "prompt"
+```
+
+The output is newline-delimited JSON (NDJSON). Token-level streaming emits `stream_event` messages:
 
 ```json
-{"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}}
-{"type": "content_block_delta", "delta": {"type": "text_delta", "text": " world"}}
-{"type": "content_block_delta", "delta": {"type": "text_delta", "text": "!"}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " world"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "!"}}}
 {"type": "result", "result": "Hello world!"}
 ```
 
-The examples parse this stream in real-time to display text as it's generated.
+Without `--include-partial-messages`, you only get complete messages (no streaming effect).

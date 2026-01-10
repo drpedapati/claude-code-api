@@ -411,12 +411,13 @@ async def generate_stream(
         yield {"event": "message", "data": json.dumps({"type": "error", "message": "Claude CLI not found"})}
         return
 
-    # Build command
+    # Build command with --include-partial-messages for token-level streaming
     cmd = [
         "claude",
         "-p",
         "--output-format",
         "stream-json",
+        "--include-partial-messages",  # Enable token-level streaming
         "--verbose",
         "--model",
         model,
@@ -440,6 +441,8 @@ async def generate_stream(
         bufsize=1,
     )
 
+    has_streamed = False
+
     try:
         for line in process.stdout:
             line = line.strip()
@@ -450,20 +453,24 @@ async def generate_stream(
                 msg = json.loads(line)
                 msg_type = msg.get("type")
 
-                if msg_type == "assistant":
-                    content = msg.get("message", {}).get("content", [])
-                    for block in content:
-                        if block.get("type") == "text":
-                            text = block.get("text", "")
+                # Handle stream_event messages (token-level streaming)
+                if msg_type == "stream_event":
+                    event = msg.get("event", {})
+                    event_type = event.get("type")
+
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
                             if text:
+                                has_streamed = True
                                 yield {"event": "message", "data": json.dumps({"type": "chunk", "text": text})}
 
-                elif msg_type == "content_block_delta":
-                    delta = msg.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        text = delta.get("text", "")
-                        if text:
-                            yield {"event": "message", "data": json.dumps({"type": "chunk", "text": text})}
+                # Fallback: if no streaming, use the result
+                elif msg_type == "result" and not has_streamed:
+                    result_text = msg.get("result", "")
+                    if result_text:
+                        yield {"event": "message", "data": json.dumps({"type": "chunk", "text": result_text})}
 
             except json.JSONDecodeError:
                 continue
