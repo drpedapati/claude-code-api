@@ -22,6 +22,12 @@ PID_FILE := .server.pid
 CHAT_PORT := 7743
 CHAT_PID_FILE := .chat.pid
 
+# Load .env.local if it exists (for CLAUDE_API_KEY, etc.)
+ifneq (,$(wildcard .env.local))
+    include .env.local
+    export
+endif
+
 # Docker settings
 IMAGE_NAME := claude-code-api
 IMAGE_TAG := latest
