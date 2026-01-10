@@ -1,44 +1,44 @@
 # Claude Code API
 
-A Python wrapper and HTTP API for the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) binary.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-This package allows you to use Claude Code as an LLM backend in your applications, either as a Python library or via HTTP endpoints.
+A Python wrapper and HTTP API for the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
 
-## Prerequisites
-
-You need the Claude Code CLI installed and authenticated:
-
-```bash
-# Install Claude Code
-npm install -g @anthropic-ai/claude-code
-
-# Authenticate (opens browser for OAuth)
-claude auth login
-```
+This library provides convenient access to Claude models through the Claude Code binary, enabling LLM inference in Python applications without direct API key management. Authentication is handled automatically via Claude Code's OAuth flow.
 
 ## Installation
 
-### As a Python Library
+### Prerequisites
 
-```bash
-# Install core library only
+Claude Code CLI must be installed and authenticated:
+
+```sh
+npm install -g @anthropic-ai/claude-code
+claude auth login
+```
+
+### From PyPI (coming soon)
+
+```sh
+pip install claude-code-api
+```
+
+### From GitHub
+
+```sh
+# Core library only
 pip install git+https://github.com/drpedapati/claude-code-api.git
 
-# Install with HTTP server support
+# With HTTP server support
 pip install "git+https://github.com/drpedapati/claude-code-api.git#egg=claude-code-api[server]"
 ```
 
 ### From Source
 
-```bash
+```sh
 git clone https://github.com/drpedapati/claude-code-api.git
 cd claude-code-api
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install with all dependencies
 pip install -e ".[all]"
 ```
 
@@ -49,57 +49,78 @@ pip install -e ".[all]"
 ```python
 from claude_code_api import ClaudeClient, claude_chat, claude_json
 
-# Using the client class
+# Initialize a client
 client = ClaudeClient(model="haiku")
+
+# Simple chat
 result = client.chat("What is the capital of France?")
 print(result.text)  # "Paris"
 
 # With system prompt
 result = client.chat(
-    "Translate to Spanish: Hello",
-    system="You are a translator. Return only the translation."
+    "Translate to Spanish: Hello, how are you?",
+    system="You are a translator. Return only the translation, nothing else."
 )
-print(result.text)  # "Hola"
+print(result.text)  # "Hola, ¿cómo estás?"
 
-# Get JSON response
+# Get structured JSON response
 data = client.chat_json(
     "What are the first 5 prime numbers?",
     system="Return JSON: {primes: [numbers]}"
 )
 print(data["primes"])  # [2, 3, 5, 7, 11]
+```
 
-# Quick helpers
+#### Convenience Functions
+
+For quick, one-off queries:
+
+```python
+from claude_code_api import claude_chat, claude_json
+
+# Simple text response
 response = claude_chat("What is 2+2?")
-data = claude_json("List 3 colors", system="Return JSON: {colors: [strings]}")
+
+# JSON response
+data = claude_json(
+    "List 3 primary colors",
+    system="Return JSON: {colors: [strings]}"
+)
 ```
 
 ### HTTP Server
 
 Start the server:
 
-```bash
-# Using the CLI
+```sh
+# Using the CLI entry point
 claude-code-api
 
-# Or with uvicorn
+# Or with uvicorn directly
 uvicorn claude_code_api.server:app --host 0.0.0.0 --port 8000
 ```
 
-API endpoints:
+#### Endpoints
 
-```bash
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check for load balancers |
+| `GET` | `/llm/status` | Verify Claude CLI availability |
+| `POST` | `/llm/chat` | Send prompt, receive text response |
+| `POST` | `/llm/json` | Send prompt, receive parsed JSON |
+
+#### Example Requests
+
+```sh
 # Health check
 curl http://localhost:8000/health
 
-# Check status
-curl http://localhost:8000/llm/status
-
-# Chat
+# Chat request
 curl -X POST http://localhost:8000/llm/chat \
   -H "Content-Type: application/json" \
   -d '{"prompt": "What is 2+2?", "model": "haiku"}'
 
-# Get JSON response
+# JSON response
 curl -X POST http://localhost:8000/llm/json \
   -H "Content-Type: application/json" \
   -d '{
@@ -109,58 +130,118 @@ curl -X POST http://localhost:8000/llm/json \
   }'
 ```
 
-API documentation available at:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+API documentation is available at:
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 ## Models
 
-Available models:
-
-| Model | Description | Best For |
+| Model | Description | Use Case |
 |-------|-------------|----------|
-| `haiku` | Fast, cost-effective | Quick queries, high volume |
-| `sonnet` | Balanced performance | General use |
-| `opus` | Most capable | Complex reasoning |
+| `haiku` | Fast, cost-effective | High-volume queries, simple tasks |
+| `sonnet` | Balanced performance | General-purpose use |
+| `opus` | Most capable | Complex reasoning, nuanced tasks |
 
 ## Configuration
 
-The Claude Code CLI handles authentication automatically. It will:
+The Claude Code CLI handles all authentication automatically:
 
-1. Use OAuth if you've logged in with `claude auth login`
-2. Fall back to `ANTHROPIC_API_KEY` environment variable if set
+1. **OAuth (recommended)**: Run `claude auth login` once to authenticate via browser
+2. **API Key fallback**: Set `ANTHROPIC_API_KEY` environment variable
 
-**Note:** This library automatically removes `ANTHROPIC_API_KEY` from the subprocess environment to avoid conflicts with OAuth authentication. If you need API key auth, set it before installing Claude Code.
+> [!NOTE]
+> This library automatically removes `ANTHROPIC_API_KEY` from the subprocess environment when calling the CLI. This prevents conflicts between API key authentication and Claude Code's OAuth flow.
 
-## Docker
+## API Reference
 
-```dockerfile
-FROM python:3.11-slim
+### ClaudeClient
 
-# Install Node.js for Claude Code CLI
-RUN apt-get update && apt-get install -y nodejs npm
-RUN npm install -g @anthropic-ai/claude-code
+```python
+ClaudeClient(
+    model: str = "haiku",      # Model: haiku, sonnet, opus
+    max_turns: int = 1,        # Conversation turns (1 for single-shot)
+    binary_path: str = None    # Path to claude binary (auto-detected)
+)
+```
 
-# Install Python package
-COPY . /app
-WORKDIR /app
-RUN pip install -e ".[server]"
+#### Methods
 
-# Note: You'll need to handle authentication
-# Either mount OAuth credentials or set ANTHROPIC_API_KEY
+**`chat(prompt, system=None) -> ClaudeResult`**
 
-EXPOSE 8000
-CMD ["claude-code-api"]
+Send a prompt and receive a response.
+
+```python
+result = client.chat("Hello!")
+print(result.text)       # Response text
+print(result.model)      # Model used
+print(result.is_error)   # True if error occurred
+```
+
+**`chat_json(prompt, system=None) -> dict`**
+
+Send a prompt and receive a parsed JSON response.
+
+```python
+data = client.chat_json(
+    "What is 2+2?",
+    system="Return JSON: {answer: number}"
+)
+# Returns: {"answer": 4}
+```
+
+Raises `ValueError` if the response cannot be parsed as JSON.
+
+### ClaudeResult
+
+```python
+@dataclass
+class ClaudeResult:
+    text: str                    # Response text
+    model: str                   # Model used
+    is_error: bool = False       # Whether an error occurred
+    error_message: str = None    # Error details if is_error is True
+```
+
+## Error Handling
+
+```python
+from claude_code_api import ClaudeClient
+
+client = ClaudeClient()
+
+# Check for errors in result
+result = client.chat("Hello")
+if result.is_error:
+    print(f"Error: {result.error_message}")
+else:
+    print(result.text)
+
+# JSON parsing errors raise ValueError
+try:
+    data = client.chat_json("Write a poem")  # Not JSON!
+except ValueError as e:
+    print(f"Could not parse JSON: {e}")
+
+# CLI errors raise RuntimeError
+try:
+    data = client.chat_json("Hello")
+except RuntimeError as e:
+    print(f"Claude CLI error: {e}")
 ```
 
 ## Development
 
-```bash
-# Install dev dependencies
+```sh
+# Clone and install with dev dependencies
+git clone https://github.com/drpedapati/claude-code-api.git
+cd claude-code-api
 pip install -e ".[dev]"
 
 # Run tests
 pytest
+
+# Run tests (skip integration tests requiring CLI)
+pytest -m "not integration"
 
 # Format code
 ruff format .
@@ -172,6 +253,11 @@ ruff check .
 mypy claude_code_api
 ```
 
+## Requirements
+
+- Python 3.10+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (Node.js 18+)
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
@@ -179,4 +265,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Related
 
 - [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code)
-- [Anthropic API](https://docs.anthropic.com/en/api)
+- [Anthropic API Reference](https://docs.anthropic.com/en/api)
+- [anthropic-sdk-python](https://github.com/anthropics/anthropic-sdk-python)

@@ -20,9 +20,11 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # PyInstaller
 *.manifest
@@ -52,21 +54,26 @@ coverage.xml
 
 # Environments
 .env
-.env.local
 .env.*
-.venv
-env/
+.venv/
 venv/
 ENV/
+env/
 env.bak/
 venv.bak/
+.python-version
 
-# IDEs
+# IDEs and editors
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
 # mypy
 .mypy_cache/
@@ -78,9 +85,27 @@ dmypy.json
 
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 
-# Jupyter
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Jupyter Notebook
 .ipynb_checkpoints/
+
+# Secrets and credentials
+*.pem
+*.key
+secrets.json
+credentials.json
 
 # Local development
 *.local
+.scratch/
+scratch/
+tmp/
+temp/
