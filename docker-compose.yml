@@ -6,7 +6,7 @@ services:
     image: claude-code-api:latest
     container_name: claude-code-api
     ports:
-      - "8000:8000"
+      - "7742:7742"
     environment:
       # Pass OAuth token from: claude setup-token
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
@@ -14,7 +14,7 @@ services:
       # Named volume for Claude CLI data (debug logs, cache)
       - claude-code-data:/home/appuser/.claude
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:7742/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -29,13 +29,13 @@ services:
     image: claude-code-api:dev
     container_name: claude-code-api-dev
     ports:
-      - "8001:8000"
+      - "7744:7742"
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
     volumes:
       - claude-code-data:/home/appuser/.claude
       - ./claude_code_api:/app/claude_code_api:ro
-    command: ["uvicorn", "claude_code_api.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "claude_code_api.server:app", "--host", "0.0.0.0", "--port", "7742", "--reload"]
     profiles:
       - dev
 

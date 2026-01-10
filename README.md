@@ -97,7 +97,7 @@ Start the server:
 claude-code-api
 
 # Or with uvicorn directly
-uvicorn claude_code_api.server:app --host 0.0.0.0 --port 8000
+uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 ```
 
 #### Endpoints
@@ -114,15 +114,15 @@ uvicorn claude_code_api.server:app --host 0.0.0.0 --port 8000
 
 ```sh
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:7742/health
 
 # Chat request
-curl -X POST http://localhost:8000/llm/chat \
+curl -X POST http://localhost:7742/llm/chat \
   -H "Content-Type: application/json" \
   -d '{"prompt": "What is 2+2?", "model": "haiku"}'
 
 # JSON response
-curl -X POST http://localhost:8000/llm/json \
+curl -X POST http://localhost:7742/llm/json \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "List 3 colors",
@@ -132,8 +132,8 @@ curl -X POST http://localhost:8000/llm/json \
 ```
 
 API documentation is available at:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+- **Swagger UI**: http://localhost:7742/docs
+- **ReDoc**: http://localhost:7742/redoc
 
 ## Models
 

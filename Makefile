@@ -15,10 +15,10 @@ BOLD := \033[1m
 DIM := \033[2m
 RESET := \033[0m
 
-# Server settings
-PORT := 8000
+# Server settings (using uncommon ports to avoid conflicts)
+PORT := 7742
 PID_FILE := .server.pid
-CHAT_PORT := 8080
+CHAT_PORT := 7743
 CHAT_PID_FILE := .chat.pid
 
 # Docker settings

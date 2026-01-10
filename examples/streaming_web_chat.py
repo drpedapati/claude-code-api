@@ -6,8 +6,8 @@ A simple web-based chat application with real-time streaming responses
 using FastAPI and Server-Sent Events (SSE).
 
 Usage:
-    uvicorn examples.streaming_web_chat:app --reload --port 8080
-    # Then open http://localhost:8080 in your browser
+    uvicorn examples.streaming_web_chat:app --reload --port 7743
+    # Then open http://localhost:7743 in your browser
 
 Requirements:
     pip install fastapi uvicorn sse-starlette
@@ -502,4 +502,4 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=7743)

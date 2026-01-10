@@ -4,11 +4,12 @@ FastAPI server exposing Claude Code as an HTTP API.
 Endpoints:
     GET  /health          - Health check
     GET  /llm/status      - Check if Claude CLI is available
+    GET  /llm/models      - List available models
     POST /llm/chat        - Send a prompt, get text response
     POST /llm/json        - Send a prompt, get JSON response
 
 Run with:
-    uvicorn claude_code_api.server:app --host 0.0.0.0 --port 8000
+    uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 """
 
 import shutil
@@ -288,7 +289,7 @@ def main():
     uvicorn.run(
         "claude_code_api.server:app",
         host="0.0.0.0",
-        port=8000,
+        port=7742,
         reload=False,
     )
 

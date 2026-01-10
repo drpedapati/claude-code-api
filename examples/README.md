@@ -37,13 +37,13 @@ A web-based chat application using FastAPI and Server-Sent Events (SSE).
 pip install sse-starlette
 
 # Run the server
-uvicorn examples.streaming_web_chat:app --reload --port 8080
+uvicorn examples.streaming_web_chat:app --reload --port 7743
 
 # Or run directly
 python examples/streaming_web_chat.py
 ```
 
-Then open http://localhost:8080 in your browser.
+Then open http://localhost:7743 in your browser.
 
 ### Features
 

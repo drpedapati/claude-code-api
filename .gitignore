@@ -109,6 +109,7 @@ credentials.json
 
 # Local development
 *.local
+*.pid
 .scratch/
 scratch/
 tmp/
