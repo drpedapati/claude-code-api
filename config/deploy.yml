@@ -57,6 +57,7 @@ env:
   # Secret environment variables (from .kamal/secrets)
   secret:
     - CLAUDE_CODE_OAUTH_TOKEN
+    - API_KEY_HASHES
 
 # SSH configuration
 ssh:

@@ -3,7 +3,7 @@
 
 .PHONY: help install dev server stop status test test-quick test-full test-gist clean lint format typecheck
 .PHONY: docker-build docker-run docker-stop docker-test docker-logs docker-shell docker-clean
-.PHONY: kamal-setup kamal-deploy kamal-logs kamal-console kamal-rollback kamal-details
+.PHONY: kamal-setup kamal-deploy kamal-redeploy kamal-logs kamal-console kamal-rollback kamal-details
 .PHONY: chat chat-web chat-web-stop
 .PHONY: api-key-create api-key-list api-key-revoke api-key-rotate
 
@@ -241,8 +241,15 @@ docker-clean:
 # Docs: https://kamal-deploy.org/docs/
 #───────────────────────────────────────────────────────────────────────────────
 
+# Kamal deployment settings (hel2 server)
+export KAMAL_SERVER_IP ?= 65.21.128.110
+export KAMAL_SSH_USER ?= ernie
+export KAMAL_REGISTRY_USERNAME ?= drpedapati
+export KAMAL_ARCH ?= amd64
+
 kamal-setup:
 	@echo "$(CYAN)Setting up Kamal on server (first-time deployment)...$(RESET)"
+	@echo "$(DIM)Server: $(KAMAL_SERVER_IP) | User: $(KAMAL_SSH_USER)$(RESET)"
 	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
 	@if ! command -v kamal >/dev/null 2>&1; then \
 		echo "$(RED)Kamal not found. Install with: gem install kamal$(RESET)"; \
@@ -251,7 +258,7 @@ kamal-setup:
 	@if [ ! -f .kamal/secrets ]; then \
 		echo "$(YELLOW)⚠ .kamal/secrets not found$(RESET)"; \
 		echo "$(DIM)  Copy .kamal/secrets.example to .kamal/secrets$(RESET)"; \
-		echo "$(DIM)  Fill in KAMAL_REGISTRY_PASSWORD and CLAUDE_CODE_OAUTH_TOKEN$(RESET)"; \
+		echo "$(DIM)  Fill in KAMAL_REGISTRY_PASSWORD, CLAUDE_CODE_OAUTH_TOKEN, API_KEY_HASHES$(RESET)"; \
 		exit 1; \
 	fi
 	kamal setup
@@ -260,6 +267,7 @@ kamal-setup:
 
 kamal-deploy:
 	@echo "$(CYAN)Deploying to production...$(RESET)"
+	@echo "$(DIM)Server: $(KAMAL_SERVER_IP) | Arch: $(KAMAL_ARCH)$(RESET)"
 	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
 	@if ! command -v kamal >/dev/null 2>&1; then \
 		echo "$(RED)Kamal not found. Install with: gem install kamal$(RESET)"; \
@@ -268,6 +276,13 @@ kamal-deploy:
 	kamal deploy
 	@echo ""
 	@echo "$(GREEN)✓ Deployment complete$(RESET)"
+	@echo "$(DIM)URL: https://claude.cincibrainlab.com$(RESET)"
+
+kamal-redeploy:
+	@echo "$(CYAN)Redeploying (rebuild + restart)...$(RESET)"
+	@echo "$(DIM)Server: $(KAMAL_SERVER_IP)$(RESET)"
+	kamal redeploy
+	@echo "$(GREEN)✓ Redeploy complete$(RESET)"
 
 kamal-logs:
 	@echo "$(CYAN)Production logs (Ctrl+C to exit)$(RESET)"
@@ -286,6 +301,10 @@ kamal-details:
 	@echo ""
 	@echo "$(BOLD)Kamal Deployment Details$(RESET)"
 	@echo "$(DIM)─────────────────────────────────────────$(RESET)"
+	@echo "$(DIM)Server: $(KAMAL_SERVER_IP) | User: $(KAMAL_SSH_USER)$(RESET)"
+	@echo "$(DIM)Registry: ghcr.io/$(KAMAL_REGISTRY_USERNAME)/claude-code-api$(RESET)"
+	@echo "$(DIM)URL: https://claude.cincibrainlab.com$(RESET)"
+	@echo ""
 	@kamal details 2>/dev/null || echo "$(YELLOW)Could not fetch details$(RESET)"
 
 #───────────────────────────────────────────────────────────────────────────────
