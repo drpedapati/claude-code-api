@@ -5,7 +5,7 @@
 service: claude-code-api
 
 # Docker image (pushed to registry)
-image: <%= ENV['KAMAL_REGISTRY_SERVER'] || 'ghcr.io' %>/<%= ENV['KAMAL_REGISTRY_USERNAME'] %>/claude-code-api
+image: <%= ENV['KAMAL_REGISTRY_USERNAME'] %>/claude-code-api
 
 # Target servers
 servers:
@@ -40,8 +40,8 @@ proxy:
 
 # Builder configuration
 builder:
-  # Target architecture (arm64 for Apple Silicon VMs)
-  arch: arm64
+  # Target architecture (amd64 for x86_64 servers, arm64 for Apple Silicon)
+  arch: <%= ENV['KAMAL_ARCH'] || 'amd64' %>
   # Use local Docker daemon
   local: true
   # Build arguments (optional)
