@@ -2,11 +2,20 @@
 
 Use this API to access Claude models via HTTP. The API wraps the Claude Code CLI and handles authentication automatically.
 
-## Base URL
+## Hosting / Base URL
 
-```
-https://claude.cincibrainlab.com
-```
+You can point this skill at:
+- Hosted instance (examples below): https://claude.cincibrainlab.com
+- Self-hosted server: run the API and use `http://localhost:7742` or your server URL.
+
+## Getting an API Key
+
+To call authenticated endpoints you need a `cca_` API key.
+
+- Hosted instance: request a key from the server operator.
+- Self-hosted: run `make api-key-create NAME=myapp` on the server and save the printed key.
+
+For self-hosting setup, see `GETTING_STARTED.md` or `README.md`.
 
 ## Authentication
 
@@ -15,6 +24,8 @@ All endpoints except `/health` require a Bearer token:
 ```
 Authorization: Bearer cca_your_api_key_here
 ```
+
+Examples below use `https://claude.cincibrainlab.com`. Replace with your own base URL if self-hosting.
 
 ## Endpoints
 
