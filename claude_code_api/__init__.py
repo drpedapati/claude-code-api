@@ -18,6 +18,24 @@ Usage:
 """
 
 from .client import ClaudeClient, ClaudeResult, claude_chat, claude_json
+from .computer_use import (
+    ComputerUseConfig,
+    ComputerUseRequest,
+    ToolResult,
+    ToolUseBlock,
+    run_computer_use_loop,
+)
 
 __version__ = "0.1.0"
-__all__ = ["ClaudeClient", "ClaudeResult", "claude_chat", "claude_json"]
+__all__ = [
+    "ClaudeClient",
+    "ClaudeResult",
+    "claude_chat",
+    "claude_json",
+    # Computer Use
+    "ComputerUseConfig",
+    "ComputerUseRequest",
+    "ToolResult",
+    "ToolUseBlock",
+    "run_computer_use_loop",
+]

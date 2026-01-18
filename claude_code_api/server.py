@@ -10,6 +10,7 @@ Endpoints:
     POST /llm/json           - Send a prompt, get JSON response
     POST /llm/query          - Full SDK query with tools, sessions, usage tracking
     POST /llm/query/stream   - Full SDK query with token-level streaming
+    POST /llm/computer-use   - Computer Use with agentic loop (screenshot, click, type)
 
 Run with:
     uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
@@ -27,6 +28,11 @@ from pydantic import BaseModel, Field
 
 from .auth import verify_api_key
 from .client import ClaudeClient
+from .computer_use import (
+    ComputerUseConfig,
+    ComputerUseRequest,
+    run_computer_use_loop,
+)
 
 app = FastAPI(
     title="Claude Code API",
@@ -783,6 +789,87 @@ async def llm_query(request: QueryRequest, _: Optional[str] = Depends(verify_api
         return await execute_query(request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+# =============================================================================
+# Computer Use API
+# =============================================================================
+
+
+async def stream_computer_use(request: ComputerUseRequest) -> AsyncGenerator[str, None]:
+    """Stream Computer Use events as SSE."""
+    config = ComputerUseConfig(
+        display_width=request.display_width,
+        display_height=request.display_height,
+        model=request.model,
+        max_turns=request.max_turns,
+        system_prompt=request.system_prompt,
+    )
+
+    async for event in run_computer_use_loop(request.prompt, config):
+        yield f"data: {json.dumps(event)}\n\n"
+
+
+@app.post("/llm/computer-use", tags=["Computer Use"])
+async def llm_computer_use(
+    request: ComputerUseRequest,
+    _: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Execute Computer Use with an agentic loop.
+
+    This endpoint allows Claude to control your computer by:
+    - Taking screenshots to see the screen
+    - Moving the mouse and clicking
+    - Typing text and pressing keys
+    - Scrolling and waiting
+
+    **IMPORTANT**: This endpoint requires:
+    - macOS: `brew install cliclick` for mouse/keyboard control
+    - Linux: `apt install xdotool` for mouse/keyboard control
+
+    **Event Types (SSE stream):**
+    - `start`: Loop started
+    - `text`: Text response from Claude
+    - `tool_use`: Claude is invoking a tool (id, name, input)
+    - `tool_result`: Tool execution result
+    - `end`: Loop complete with final result
+    - `error`: Error occurred
+
+    **Example Request:**
+    ```json
+    {
+        "prompt": "Open the calculator app and compute 2+2",
+        "model": "sonnet",
+        "max_turns": 10,
+        "display_width": 1024,
+        "display_height": 768
+    }
+    ```
+
+    **Example Events:**
+    ```
+    data: {"type": "start"}
+    data: {"type": "tool_use", "id": "...", "name": "computer", "input": {"action": "screenshot"}}
+    data: {"type": "tool_result", "id": "...", "result": {"output": "Screenshot captured", "has_image": true}}
+    data: {"type": "text", "text": "I can see your desktop..."}
+    data: {"type": "tool_use", "id": "...", "name": "computer", "input": {"action": "left_click", "coordinate": [100, 200]}}
+    data: {"type": "end", "result": "I opened the calculator and computed 2+2=4"}
+    ```
+
+    **Security Note:**
+    This endpoint gives Claude control of your computer. Use with caution and
+    only in trusted environments. Consider running in a sandboxed VM.
+    """
+    return StreamingResponse(
+        stream_computer_use(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # =============================================================================
