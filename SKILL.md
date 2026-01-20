@@ -182,7 +182,58 @@ curl https://claude.cincibrainlab.com/health
 }
 ```
 
-### 6. Models List (`GET /llm/models`)
+### 6. Computer Use (`POST /llm/computer-use`)
+
+Agentic loop for controlling the computer via screenshots, mouse, and keyboard.
+
+**IMPORTANT**: Requires system tools:
+- macOS: `brew install cliclick`
+- Linux: `apt install xdotool`
+
+```bash
+curl -N -X POST https://claude.cincibrainlab.com/llm/computer-use \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Open calculator and compute 2+2", "model": "sonnet", "max_turns": 10}'
+```
+
+**Request:**
+```json
+{
+  "prompt": "What you want Claude to do on the computer",
+  "model": "sonnet",                  // sonnet recommended for Computer Use
+  "max_turns": 10,                    // 1-50, number of agentic loop turns
+  "display_width": 1024,              // Screen width in pixels
+  "display_height": 768,              // Screen height in pixels
+  "system_prompt": "Optional system prompt"
+}
+```
+
+**Events (SSE Stream):**
+```
+data: {"type": "start"}
+data: {"type": "tool_use", "id": "...", "name": "computer", "input": {"action": "screenshot"}}
+data: {"type": "tool_result", "id": "...", "result": {"output": "Screenshot captured", "has_image": true}}
+data: {"type": "text", "text": "I can see your desktop..."}
+data: {"type": "tool_use", "id": "...", "name": "computer", "input": {"action": "left_click", "coordinate": [100, 200]}}
+data: {"type": "tool_result", "id": "...", "result": {"output": "Executed left_click at (100, 200)"}}
+data: {"type": "end", "result": "Completed task successfully"}
+```
+
+**Available Computer Actions:**
+- `screenshot` - Capture screen
+- `mouse_move` - Move mouse to coordinate
+- `left_click` - Click at coordinate
+- `right_click` - Right-click at coordinate
+- `double_click` - Double-click at coordinate
+- `type` - Type text
+- `key` - Press key (Return, Tab, etc.)
+- `scroll` - Scroll at coordinate
+- `wait` - Wait for duration
+
+**Security Warning:** This endpoint gives Claude control of your computer. Use with caution and only in trusted environments. Consider running in a sandboxed VM.
+
+### 7. Models List (`GET /llm/models`)
 
 ```bash
 curl -H "Authorization: Bearer $API_KEY" https://claude.cincibrainlab.com/llm/models

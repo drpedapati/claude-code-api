@@ -97,6 +97,9 @@ uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 | `POST` | `/llm/chat` | Text response |
 | `POST` | `/llm/chat/stream` | Streaming response (SSE) |
 | `POST` | `/llm/json` | JSON response |
+| `POST` | `/llm/query` | Full SDK query with images, tools, sessions |
+| `POST` | `/llm/query/stream` | Streaming query with token-level updates |
+| `POST` | `/llm/computer-use` | Computer control (screenshot, click, type) |
 
 #### Example Requests
 
@@ -119,6 +122,37 @@ curl -X POST http://localhost:7742/llm/json \
 ```
 
 **API Docs**: http://localhost:7742/docs
+
+### Computer Use
+
+Control your computer through Claude using an agentic loop with screenshots, mouse, and keyboard actions.
+
+```sh
+# Prerequisites (macOS)
+brew install cliclick
+
+# Prerequisites (Linux)
+apt install xdotool gnome-screenshot  # or scrot
+
+# Example request
+curl -N -X POST http://localhost:7742/llm/computer-use \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Open the calculator app and compute 15 * 23",
+    "model": "sonnet",
+    "max_turns": 10,
+    "display_width": 1024,
+    "display_height": 768
+  }'
+```
+
+**Available Actions:**
+- Screenshot capture
+- Mouse movement and clicking
+- Keyboard typing and key presses
+- Scrolling and waiting
+
+**Security Note:** Computer Use gives Claude control of your computer. Use only in trusted environments or sandboxed VMs.
 
 ## Models
 
