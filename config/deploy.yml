@@ -28,6 +28,9 @@ registry:
 proxy:
   # Application port inside container (using uncommon port to avoid conflicts)
   app_port: 7742
+  # Response timeout for long-running requests (vision analysis, complex queries)
+  # Default is 30s, increased to 300s (5 min) for /llm/query with large images
+  response_timeout: 300
   # Healthcheck configuration
   healthcheck:
     interval: 10
