@@ -233,7 +233,90 @@ data: {"type": "end", "result": "Completed task successfully"}
 
 **Security Warning:** This endpoint gives Claude control of your computer. Use with caution and only in trusted environments. Consider running in a sandboxed VM.
 
-### 7. Models List (`GET /llm/models`)
+### 7. Async Query (`POST /llm/query/async` + `GET /llm/query/async/{job_id}`)
+
+For long-running requests (complex vision analysis, multi-image processing) that may take more than 30 seconds. Uses job-based polling to avoid gateway timeouts.
+
+**Step 1: Submit the job**
+
+```bash
+curl -X POST https://claude.cincibrainlab.com/llm/query/async \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Analyze this complex form and extract all fields with their relationships",
+    "images": [{"data": "iVBORw0KGgo...", "media_type": "image/png"}],
+    "model": "sonnet"
+  }'
+```
+
+**Submit Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "pending",
+  "message": "Job submitted successfully",
+  "poll_url": "/llm/query/async/550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Step 2: Poll for results**
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  "https://claude.cincibrainlab.com/llm/query/async/550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Poll Response (running):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running",
+  "created_at": "2024-01-20T10:00:00Z",
+  "started_at": "2024-01-20T10:00:01Z",
+  "completed_at": null,
+  "result": null,
+  "error": null
+}
+```
+
+**Poll Response (completed):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "created_at": "2024-01-20T10:00:00Z",
+  "started_at": "2024-01-20T10:00:01Z",
+  "completed_at": "2024-01-20T10:02:30Z",
+  "result": {
+    "text": "The form contains 15 fields...",
+    "model": "sonnet",
+    "session_id": "...",
+    "total_cost_usd": 0.05,
+    "duration_ms": 149000,
+    "is_error": false
+  },
+  "error": null
+}
+```
+
+**Job Status Values:**
+- `pending` - Job is queued but not started
+- `running` - Job is currently being processed
+- `completed` - Job finished successfully (result available)
+- `failed` - Job failed (error message available)
+
+**When to use async:**
+- Large images (multi-MB files)
+- Complex multi-image semantic analysis
+- Requests expected to take > 30 seconds
+- Avoiding 504 gateway timeouts
+
+**Polling Strategy:**
+- Poll every 2-5 seconds
+- Jobs are retained for 24 hours after completion
+
+### 8. Models List (`GET /llm/models`)
 
 ```bash
 curl -H "Authorization: Bearer $API_KEY" https://claude.cincibrainlab.com/llm/models

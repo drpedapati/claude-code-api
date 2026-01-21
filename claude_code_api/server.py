@@ -10,6 +10,8 @@ Endpoints:
     POST /llm/json           - Send a prompt, get JSON response
     POST /llm/query          - Full SDK query with tools, sessions, usage tracking
     POST /llm/query/stream   - Full SDK query with token-level streaming
+    POST /llm/query/async    - Submit async query job (returns job_id for polling)
+    GET  /llm/query/async/{job_id} - Poll for async query result
     POST /llm/computer-use   - Computer Use with agentic loop (screenshot, click, type)
 
 Run with:
@@ -20,6 +22,9 @@ import asyncio
 import json
 import os
 import shutil
+import uuid
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import AsyncGenerator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -271,6 +276,71 @@ class QueryResponse(BaseModel):
     error_message: Optional[str] = Field(
         default=None, description="Error message if is_error is true"
     )
+
+
+# =============================================================================
+# Async Query Models (Job-based for long-running queries)
+# =============================================================================
+
+
+class JobStatus(str, Enum):
+    """Status of an async query job."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AsyncJobSubmitResponse(BaseModel):
+    """Response when submitting an async query job."""
+    job_id: str = Field(..., description="Unique job identifier for polling")
+    status: JobStatus = Field(default=JobStatus.PENDING, description="Initial job status")
+    message: str = Field(default="Job submitted successfully", description="Status message")
+    poll_url: str = Field(..., description="URL to poll for results")
+
+
+class AsyncJobStatusResponse(BaseModel):
+    """Response when polling for async job status."""
+    job_id: str = Field(..., description="Job identifier")
+    status: JobStatus = Field(..., description="Current job status")
+    created_at: datetime = Field(..., description="When the job was created")
+    started_at: Optional[datetime] = Field(default=None, description="When processing started")
+    completed_at: Optional[datetime] = Field(default=None, description="When processing completed")
+    result: Optional[QueryResponse] = Field(default=None, description="Query result (when completed)")
+    error: Optional[str] = Field(default=None, description="Error message (when failed)")
+
+
+class AsyncJob:
+    """Internal job tracking object."""
+    def __init__(self, job_id: str, request: QueryRequest):
+        self.job_id = job_id
+        self.request = request
+        self.status = JobStatus.PENDING
+        self.created_at = datetime.utcnow()
+        self.started_at: Optional[datetime] = None
+        self.completed_at: Optional[datetime] = None
+        self.result: Optional[QueryResponse] = None
+        self.error: Optional[str] = None
+        self.task: Optional[asyncio.Task] = None
+
+
+# In-memory job store (for production, consider Redis or a database)
+_jobs: dict[str, AsyncJob] = {}
+
+# Job retention settings
+JOB_MAX_AGE_HOURS = 24  # Keep completed jobs for 24 hours
+JOB_CLEANUP_INTERVAL = 3600  # Clean up every hour
+
+
+def _cleanup_old_jobs():
+    """Remove jobs older than JOB_MAX_AGE_HOURS."""
+    cutoff = datetime.utcnow() - timedelta(hours=JOB_MAX_AGE_HOURS)
+    to_delete = [
+        job_id for job_id, job in _jobs.items()
+        if job.completed_at and job.completed_at < cutoff
+    ]
+    for job_id in to_delete:
+        del _jobs[job_id]
 
 
 # =============================================================================
@@ -789,6 +859,163 @@ async def llm_query(request: QueryRequest, _: Optional[str] = Depends(verify_api
         return await execute_query(request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+# =============================================================================
+# Async Query API (Job-based for long-running queries)
+# =============================================================================
+
+
+async def _run_async_job(job: AsyncJob):
+    """Background task to execute an async query job."""
+    job.status = JobStatus.RUNNING
+    job.started_at = datetime.utcnow()
+
+    try:
+        result = await execute_query(job.request)
+        job.result = result
+        job.status = JobStatus.COMPLETED if not result.is_error else JobStatus.FAILED
+        if result.is_error:
+            job.error = result.error_message
+    except Exception as e:
+        job.status = JobStatus.FAILED
+        job.error = str(e)
+    finally:
+        job.completed_at = datetime.utcnow()
+
+
+@app.post("/llm/query/async", response_model=AsyncJobSubmitResponse, tags=["LLM"])
+async def llm_query_async_submit(
+    request: QueryRequest,
+    _: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Submit an async query job for long-running requests.
+
+    Returns immediately with a job_id that can be used to poll for results.
+    This is ideal for complex vision analysis, multi-image queries, or any
+    request that may take more than 30 seconds.
+
+    **Use this instead of /llm/query when:**
+    - Processing large images (multi-MB files)
+    - Complex multi-image semantic analysis
+    - Requests expected to take > 30 seconds
+    - You want to avoid gateway timeouts
+
+    **Workflow:**
+    1. POST to /llm/query/async with your query → get job_id
+    2. Poll GET /llm/query/async/{job_id} until status is "completed" or "failed"
+    3. Result is included in the response when completed
+
+    **Example Request:**
+    ```json
+    {
+        "prompt": "Analyze this complex form and extract all fields with their relationships",
+        "images": [{"data": "iVBORw0KGgo...", "media_type": "image/png"}],
+        "model": "sonnet"
+    }
+    ```
+
+    **Example Response:**
+    ```json
+    {
+        "job_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "pending",
+        "message": "Job submitted successfully",
+        "poll_url": "/llm/query/async/550e8400-e29b-41d4-a716-446655440000"
+    }
+    ```
+    """
+    # Clean up old jobs periodically
+    _cleanup_old_jobs()
+
+    # Create new job
+    job_id = str(uuid.uuid4())
+    job = AsyncJob(job_id, request)
+    _jobs[job_id] = job
+
+    # Start background task
+    job.task = asyncio.create_task(_run_async_job(job))
+
+    return AsyncJobSubmitResponse(
+        job_id=job_id,
+        status=JobStatus.PENDING,
+        message="Job submitted successfully",
+        poll_url=f"/llm/query/async/{job_id}",
+    )
+
+
+@app.get("/llm/query/async/{job_id}", response_model=AsyncJobStatusResponse, tags=["LLM"])
+async def llm_query_async_status(
+    job_id: str,
+    _: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Poll for async query job status and results.
+
+    Returns the current status of a job. When status is "completed",
+    the full QueryResponse is included in the result field.
+
+    **Status Values:**
+    - `pending`: Job is queued but not started
+    - `running`: Job is currently being processed
+    - `completed`: Job finished successfully (result available)
+    - `failed`: Job failed (error message available)
+
+    **Example Response (running):**
+    ```json
+    {
+        "job_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "running",
+        "created_at": "2024-01-20T10:00:00Z",
+        "started_at": "2024-01-20T10:00:01Z",
+        "completed_at": null,
+        "result": null,
+        "error": null
+    }
+    ```
+
+    **Example Response (completed):**
+    ```json
+    {
+        "job_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "completed",
+        "created_at": "2024-01-20T10:00:00Z",
+        "started_at": "2024-01-20T10:00:01Z",
+        "completed_at": "2024-01-20T10:02:30Z",
+        "result": {
+            "text": "The form contains 15 fields...",
+            "model": "sonnet",
+            "session_id": "...",
+            "total_cost_usd": 0.05,
+            "duration_ms": 149000,
+            "is_error": false
+        },
+        "error": null
+    }
+    ```
+
+    **Recommended Polling Strategy:**
+    - Poll every 2-5 seconds
+    - Use exponential backoff for long-running jobs
+    - Maximum polling duration: 10 minutes
+    """
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Job not found: {job_id}. Jobs are retained for {JOB_MAX_AGE_HOURS} hours after completion.",
+        )
+
+    return AsyncJobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        result=job.result,
+        error=job.error,
+    )
 
 
 # =============================================================================

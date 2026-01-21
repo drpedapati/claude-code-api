@@ -99,6 +99,8 @@ uvicorn claude_code_api.server:app --host 0.0.0.0 --port 7742
 | `POST` | `/llm/json` | JSON response |
 | `POST` | `/llm/query` | Full SDK query with images, tools, sessions |
 | `POST` | `/llm/query/stream` | Streaming query with token-level updates |
+| `POST` | `/llm/query/async` | Submit async job (returns job_id for polling) |
+| `GET` | `/llm/query/async/{job_id}` | Poll for async job result |
 | `POST` | `/llm/computer-use` | Computer control (screenshot, click, type) |
 
 #### Example Requests
@@ -153,6 +155,48 @@ curl -N -X POST http://localhost:7742/llm/computer-use \
 - Scrolling and waiting
 
 **Security Note:** Computer Use gives Claude control of your computer. Use only in trusted environments or sandboxed VMs.
+
+### Async Queries (Long-Running Requests)
+
+For complex vision analysis or requests that may take more than 30 seconds, use the async job endpoint to avoid timeouts.
+
+```sh
+# 1. Submit the job
+JOB_RESPONSE=$(curl -s -X POST http://localhost:7742/llm/query/async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Analyze this complex form and extract all fields",
+    "images": [{"data": "'$(base64 -i form.png)'", "media_type": "image/png"}],
+    "model": "sonnet"
+  }')
+
+JOB_ID=$(echo $JOB_RESPONSE | jq -r '.job_id')
+echo "Job submitted: $JOB_ID"
+
+# 2. Poll for results
+while true; do
+  STATUS=$(curl -s "http://localhost:7742/llm/query/async/$JOB_ID")
+  JOB_STATUS=$(echo $STATUS | jq -r '.status')
+
+  if [ "$JOB_STATUS" = "completed" ]; then
+    echo "Done! Result:"
+    echo $STATUS | jq '.result.text'
+    break
+  elif [ "$JOB_STATUS" = "failed" ]; then
+    echo "Failed: $(echo $STATUS | jq -r '.error')"
+    break
+  fi
+
+  echo "Status: $JOB_STATUS, waiting..."
+  sleep 3
+done
+```
+
+**When to use async:**
+- Large image analysis (multi-MB files)
+- Complex multi-image semantic analysis
+- Requests expected to take > 30 seconds
+- Avoiding gateway timeouts (504 errors)
 
 ## Models
 
