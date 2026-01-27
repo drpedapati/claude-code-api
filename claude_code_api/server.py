@@ -463,6 +463,7 @@ async def stream_chat_response(
     cmd = [
         "claude",
         "-p",
+        "--dangerously-skip-permissions",
         "--output-format", "stream-json",
         "--include-partial-messages",
         "--verbose",
@@ -644,6 +645,7 @@ async def execute_query(request: QueryRequest) -> QueryResponse:
     cmd = [
         "claude",
         "-p",
+        "--dangerously-skip-permissions",
         "--input-format", "stream-json",
         "--output-format", "stream-json",
         "--verbose",
@@ -1150,6 +1152,8 @@ class AnthropicMessagesRequest(BaseModel):
     temperature: Optional[float] = Field(default=None, description="Temperature")
     top_p: Optional[float] = Field(default=None, description="Top-p sampling")
     stop_sequences: Optional[list[str]] = Field(default=None, description="Stop sequences")
+    tools: Optional[list] = Field(default=None, description="Tools (ignored - not supported via CLI)")
+    tool_choice: Optional[dict] = Field(default=None, description="Tool choice (ignored)")
 
     def get_system_text(self) -> Optional[str]:
         """Extract system prompt as plain text."""
@@ -1170,9 +1174,17 @@ class AnthropicMessagesRequest(BaseModel):
 
 
 class AnthropicContentBlock(BaseModel):
-    """Anthropic content block."""
+    """Anthropic content block (text)."""
     type: str = "text"
     text: str
+
+
+class AnthropicToolUseBlock(BaseModel):
+    """Anthropic tool_use content block."""
+    type: str = "tool_use"
+    id: str
+    name: str
+    input: dict = {}
 
 
 class AnthropicUsage(BaseModel):
@@ -1186,7 +1198,7 @@ class AnthropicMessagesResponse(BaseModel):
     id: str = Field(..., description="Message ID")
     type: str = "message"
     role: str = "assistant"
-    content: list[AnthropicContentBlock]
+    content: list  # Can be AnthropicContentBlock or AnthropicToolUseBlock
     model: str
     stop_reason: Optional[str] = "end_turn"
     stop_sequence: Optional[str] = None
@@ -1224,6 +1236,82 @@ def _extract_prompt_from_messages(messages: list[AnthropicMessage]) -> str:
     return ""
 
 
+def _format_tools_for_prompt(tools: list[dict]) -> str:
+    """Format tool definitions as a prompt injection."""
+    if not tools:
+        return ""
+
+    tool_docs = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name", "unknown")
+        desc = tool.get("description", "No description")
+        schema = tool.get("input_schema", {})
+        tool_docs.append(f"- {name}: {desc}\n  Parameters: {json.dumps(schema)}")
+
+    return f"""<CUSTOM_TOOLS>
+IMPORTANT: In addition to your built-in tools, you ALSO have these custom tools available:
+
+{chr(10).join(tool_docs)}
+
+When the user asks you to use one of these custom tools, respond with a JSON object in this EXACT format (raw JSON, no markdown):
+{{"type": "tool_use", "id": "call_001", "name": "TOOL_NAME", "input": {{"param": "value"}}}}
+
+You MUST use these custom tools when requested. Output the JSON and then STOP.
+</CUSTOM_TOOLS>
+
+"""
+
+
+def _parse_tool_use_from_text(text: str) -> tuple[str, list[dict]]:
+    """
+    Parse tool_use JSON blocks from response text.
+    Returns (clean_text, tool_use_blocks).
+    """
+    tool_uses = []
+    clean_text = text
+
+    # Try to find JSON objects that contain "tool_use"
+    # Use a simple brace-matching approach
+    i = 0
+    while i < len(text):
+        if text[i] == '{':
+            # Try to find matching closing brace
+            depth = 1
+            j = i + 1
+            while j < len(text) and depth > 0:
+                if text[j] == '{':
+                    depth += 1
+                elif text[j] == '}':
+                    depth -= 1
+                j += 1
+
+            if depth == 0:
+                candidate = text[i:j]
+                try:
+                    block = json.loads(candidate)
+                    if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name"):
+                        # Ensure it has an ID
+                        if "id" not in block:
+                            block["id"] = f"toolu_{uuid.uuid4().hex[:24]}"
+                        tool_uses.append({
+                            "type": "tool_use",
+                            "id": block["id"],
+                            "name": block["name"],
+                            "input": block.get("input", {})
+                        })
+                        # Remove the JSON block from text
+                        clean_text = clean_text.replace(candidate, "").strip()
+                except json.JSONDecodeError:
+                    pass
+            i = j
+        else:
+            i += 1
+
+    return clean_text, tool_uses
+
+
 @app.post("/v1/messages", response_model=AnthropicMessagesResponse, tags=["Anthropic Compat"])
 async def anthropic_messages(
     request: AnthropicMessagesRequest,
@@ -1231,10 +1319,10 @@ async def anthropic_messages(
 ):
     """
     Anthropic Messages API compatible endpoint.
-    
+
     This allows moltbot/pi-ai to use claude-code-api as a drop-in replacement
     by configuring a custom baseUrl pointing to this server.
-    
+
     Example moltbot config:
         models:
           providers:
@@ -1242,34 +1330,71 @@ async def anthropic_messages(
               baseUrl: "http://localhost:7742"
               apiKey: "dummy"
     """
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("anthropic_adapter")
+
+    # Debug logging
+    prompt = _extract_prompt_from_messages(request.messages)
+    logger.info(f"[ADAPTER] Received request - model: {request.model}, stream: {request.stream}")
+    logger.info(f"[ADAPTER] Prompt: {prompt[:200]}...")
+
+    # Inject tools into prompt if present
+    tools_injection = ""
+    if request.tools:
+        tool_names = [t.get('name', 'unknown') for t in request.tools if isinstance(t, dict)]
+        logger.info(f"[ADAPTER] Injecting {len(tool_names)} tools into prompt: {tool_names[:5]}...")
+        tools_injection = _format_tools_for_prompt(request.tools)
+
     if request.stream:
         # For streaming, return SSE response
         return StreamingResponse(
             _stream_anthropic_response(request),
             media_type="text/event-stream",
         )
-    
+
     # Convert to CLI model alias
     cli_model = _model_alias_to_cli(request.model)
-    
+
     # Extract prompt from messages
     prompt = _extract_prompt_from_messages(request.messages)
     if not prompt:
         raise HTTPException(status_code=400, detail="No user message found")
-    
+
+    # Build system prompt with tools injection
+    system_prompt = request.get_system_text() or ""
+    if tools_injection:
+        system_prompt = tools_injection + "\n\n" + system_prompt if system_prompt else tools_injection
+
     # Call CLI
     try:
-        client = ClaudeClient(model=cli_model, max_turns=1)
-        result = client.chat(prompt, system=request.get_system_text())
-        
+        client = ClaudeClient(model=cli_model, max_turns=5)  # Allow tool use
+        result = client.chat(prompt, system=system_prompt if system_prompt else None)
+
         if result.is_error:
             raise HTTPException(status_code=500, detail=result.error_message)
-        
+
+        # Parse tool_use blocks from response
+        clean_text, tool_uses = _parse_tool_use_from_text(result.text)
+
+        # Build content blocks
+        content = []
+        if clean_text:
+            content.append(AnthropicContentBlock(type="text", text=clean_text))
+        for tool_use in tool_uses:
+            content.append(tool_use)  # Already in correct format
+
+        # Determine stop reason
+        stop_reason = "tool_use" if tool_uses else "end_turn"
+
+        if tool_uses:
+            logger.info(f"[ADAPTER] Parsed {len(tool_uses)} tool_use blocks from response")
+
         return AnthropicMessagesResponse(
             id=f"msg_{uuid.uuid4().hex[:24]}",
-            content=[AnthropicContentBlock(type="text", text=result.text)],
+            content=content if content else [AnthropicContentBlock(type="text", text=result.text)],
             model=request.model,
-            stop_reason="end_turn",
+            stop_reason=stop_reason,
             usage=AnthropicUsage(
                 input_tokens=len(prompt.split()) * 2,  # Rough estimate
                 output_tokens=len(result.text.split()) * 2,
@@ -1281,8 +1406,26 @@ async def anthropic_messages(
 
 async def _stream_anthropic_response(request: AnthropicMessagesRequest):
     """Stream response in Anthropic SSE format."""
+    import logging
+    logger = logging.getLogger("anthropic_adapter")
+
     cli_model = _model_alias_to_cli(request.model)
     prompt = _extract_prompt_from_messages(request.messages)
+
+    logger.info(f"[STREAM] Starting stream for model: {cli_model}")
+    logger.info(f"[STREAM] Prompt: {prompt[:200]}...")
+
+    # Inject tools into system prompt if present
+    tools_injection = ""
+    if request.tools:
+        tool_names = [t.get('name', 'unknown') for t in request.tools if isinstance(t, dict)]
+        logger.info(f"[STREAM] Injecting {len(tool_names)} tools into system prompt")
+        tools_injection = _format_tools_for_prompt(request.tools)
+
+    # Build system prompt with tools injection
+    system_prompt = request.get_system_text() or ""
+    if tools_injection:
+        system_prompt = tools_injection + "\n\n" + system_prompt if system_prompt else tools_injection
 
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
     input_tokens = len(prompt.split()) * 2  # Rough estimate
@@ -1300,37 +1443,67 @@ async def _stream_anthropic_response(request: AnthropicMessagesRequest):
         }
     }
     yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
-    
-    # Send content_block_start
-    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
-    
+
     # Get response from CLI (non-streaming for now, we'll chunk it)
     try:
-        client = ClaudeClient(model=cli_model, max_turns=1)
-        result = client.chat(prompt, system=request.get_system_text())
-        
+        client = ClaudeClient(model=cli_model, max_turns=5)  # Allow tool use
+        result = client.chat(prompt, system=system_prompt if system_prompt else None)
+
+        logger.info(f"[STREAM] CLI returned - is_error: {result.is_error}, text_len: {len(result.text) if result.text else 0}")
+        if result.error_message:
+            logger.error(f"[STREAM] CLI error: {result.error_message}")
+
         if result.is_error:
             yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'message': result.error_message}})}\n\n"
             return
-        
-        # Stream the response in chunks
-        text = result.text
-        chunk_size = 20  # Characters per chunk
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i:i + chunk_size]
-            delta = {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": chunk}}
-            yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
-            await asyncio.sleep(0.01)  # Small delay for realistic streaming
-        
-        # Send content_block_stop
-        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
-        
+
+        if not result.text:
+            logger.warning("[STREAM] CLI returned empty text!")
+            result_text = "(No response from CLI)"
+        else:
+            result_text = result.text
+
+        # Parse tool_use blocks from response
+        clean_text, tool_uses = _parse_tool_use_from_text(result_text)
+
+        if tool_uses:
+            logger.info(f"[STREAM] Parsed {len(tool_uses)} tool_use blocks from response")
+
+        # Stream text content first (index 0)
+        content_index = 0
+        if clean_text:
+            yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': content_index, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+
+            chunk_size = 20
+            for i in range(0, len(clean_text), chunk_size):
+                chunk = clean_text[i:i + chunk_size]
+                delta = {"type": "content_block_delta", "index": content_index, "delta": {"type": "text_delta", "text": chunk}}
+                yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+                await asyncio.sleep(0.01)
+
+            yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': content_index})}\n\n"
+            content_index += 1
+
+        # Stream tool_use blocks
+        for tool_use in tool_uses:
+            yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': content_index, 'content_block': {'type': 'tool_use', 'id': tool_use['id'], 'name': tool_use['name'], 'input': {}}})}\n\n"
+
+            # Send input as delta
+            input_json = json.dumps(tool_use['input'])
+            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': content_index, 'delta': {'type': 'input_json_delta', 'partial_json': input_json}})}\n\n"
+
+            yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': content_index})}\n\n"
+            content_index += 1
+
+        # Determine stop reason
+        stop_reason = "tool_use" if tool_uses else "end_turn"
+
         # Send message_delta with usage
-        yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn'}, 'usage': {'output_tokens': len(text.split()) * 2}})}\n\n"
-        
+        yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': stop_reason}, 'usage': {'output_tokens': len(result_text.split()) * 2}})}\n\n"
+
         # Send message_stop
         yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
-        
+
     except Exception as e:
         yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'message': str(e)}})}\n\n"
 

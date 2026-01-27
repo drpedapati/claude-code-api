@@ -104,6 +104,7 @@ class ClaudeClient:
         cmd = [
             "claude",
             "-p",  # Print mode (non-interactive)
+            "--dangerously-skip-permissions",  # Allow tools without prompting
             "--output-format",
             "stream-json",
             "--verbose",
@@ -118,7 +119,15 @@ class ClaudeClient:
 
         cmd.extend(["--", prompt])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            return ClaudeResult(
+                text="",
+                model=self.model,
+                is_error=True,
+                error_message="CLI timeout after 120 seconds",
+            )
 
         if result.returncode != 0:
             error_detail = f"Exit code {result.returncode}"
