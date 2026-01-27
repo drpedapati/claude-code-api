@@ -1118,3 +1118,190 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# =============================================================================
+# Anthropic-Compatible API Adapter (for Moltbot/pi-ai integration)
+# =============================================================================
+# This endpoint mimics the Anthropic Messages API format, allowing moltbot
+# to use claude-code-api as a drop-in replacement by setting a custom baseUrl.
+#
+# Configure moltbot with:
+#   models:
+#     providers:
+#       anthropic:
+#         baseUrl: "http://localhost:7742"
+#         apiKey: "dummy"  # Not used, CLI handles auth
+
+
+class AnthropicMessage(BaseModel):
+    """Anthropic-format message."""
+    role: str = Field(..., description="Role: user or assistant")
+    content: str | list = Field(..., description="Message content")
+
+
+class AnthropicMessagesRequest(BaseModel):
+    """Anthropic Messages API compatible request."""
+    model: str = Field(..., description="Model ID (e.g., claude-sonnet-4-5-20250929)")
+    messages: list[AnthropicMessage] = Field(..., description="Conversation messages")
+    max_tokens: int = Field(default=4096, description="Maximum tokens to generate")
+    system: Optional[str] = Field(default=None, description="System prompt")
+    stream: bool = Field(default=False, description="Enable streaming")
+    temperature: Optional[float] = Field(default=None, description="Temperature")
+    top_p: Optional[float] = Field(default=None, description="Top-p sampling")
+    stop_sequences: Optional[list[str]] = Field(default=None, description="Stop sequences")
+
+
+class AnthropicContentBlock(BaseModel):
+    """Anthropic content block."""
+    type: str = "text"
+    text: str
+
+
+class AnthropicUsage(BaseModel):
+    """Anthropic usage info."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class AnthropicMessagesResponse(BaseModel):
+    """Anthropic Messages API compatible response."""
+    id: str = Field(..., description="Message ID")
+    type: str = "message"
+    role: str = "assistant"
+    content: list[AnthropicContentBlock]
+    model: str
+    stop_reason: Optional[str] = "end_turn"
+    stop_sequence: Optional[str] = None
+    usage: AnthropicUsage
+
+
+def _model_alias_to_cli(model_id: str) -> str:
+    """Convert Anthropic model ID to CLI alias."""
+    model_lower = model_id.lower()
+    if "opus" in model_lower:
+        return "opus"
+    elif "sonnet" in model_lower:
+        return "sonnet"
+    elif "haiku" in model_lower:
+        return "haiku"
+    # Default to sonnet for unknown models
+    return "sonnet"
+
+
+def _extract_prompt_from_messages(messages: list[AnthropicMessage]) -> str:
+    """Extract the last user message as the prompt."""
+    for msg in reversed(messages):
+        if msg.role == "user":
+            if isinstance(msg.content, str):
+                return msg.content
+            elif isinstance(msg.content, list):
+                # Extract text from content blocks
+                texts = []
+                for block in msg.content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(block.get("text", ""))
+                    elif isinstance(block, str):
+                        texts.append(block)
+                return "\n".join(texts)
+    return ""
+
+
+@app.post("/v1/messages", response_model=AnthropicMessagesResponse, tags=["Anthropic Compat"])
+async def anthropic_messages(
+    request: AnthropicMessagesRequest,
+    _: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Anthropic Messages API compatible endpoint.
+    
+    This allows moltbot/pi-ai to use claude-code-api as a drop-in replacement
+    by configuring a custom baseUrl pointing to this server.
+    
+    Example moltbot config:
+        models:
+          providers:
+            anthropic:
+              baseUrl: "http://localhost:7742"
+              apiKey: "dummy"
+    """
+    if request.stream:
+        # For streaming, return SSE response
+        return StreamingResponse(
+            _stream_anthropic_response(request),
+            media_type="text/event-stream",
+        )
+    
+    # Convert to CLI model alias
+    cli_model = _model_alias_to_cli(request.model)
+    
+    # Extract prompt from messages
+    prompt = _extract_prompt_from_messages(request.messages)
+    if not prompt:
+        raise HTTPException(status_code=400, detail="No user message found")
+    
+    # Call CLI
+    try:
+        client = ClaudeClient(model=cli_model, max_turns=1)
+        result = client.chat(prompt, system=request.system)
+        
+        if result.is_error:
+            raise HTTPException(status_code=500, detail=result.error_message)
+        
+        return AnthropicMessagesResponse(
+            id=f"msg_{uuid.uuid4().hex[:24]}",
+            content=[AnthropicContentBlock(type="text", text=result.text)],
+            model=request.model,
+            stop_reason="end_turn",
+            usage=AnthropicUsage(
+                input_tokens=len(prompt.split()) * 2,  # Rough estimate
+                output_tokens=len(result.text.split()) * 2,
+            ),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+async def _stream_anthropic_response(request: AnthropicMessagesRequest):
+    """Stream response in Anthropic SSE format."""
+    cli_model = _model_alias_to_cli(request.model)
+    prompt = _extract_prompt_from_messages(request.messages)
+    
+    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+    
+    # Send message_start event
+    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': request.model}})}\n\n"
+    
+    # Send content_block_start
+    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+    
+    # Get response from CLI (non-streaming for now, we'll chunk it)
+    try:
+        client = ClaudeClient(model=cli_model, max_turns=1)
+        result = client.chat(prompt, system=request.system)
+        
+        if result.is_error:
+            yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'message': result.error_message}})}\n\n"
+            return
+        
+        # Stream the response in chunks
+        text = result.text
+        chunk_size = 20  # Characters per chunk
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i:i + chunk_size]
+            delta = {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": chunk}}
+            yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+            await asyncio.sleep(0.01)  # Small delay for realistic streaming
+        
+        # Send content_block_stop
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+        
+        # Send message_delta with usage
+        yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn'}, 'usage': {'output_tokens': len(text.split()) * 2}})}\n\n"
+        
+        # Send message_stop
+        yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
+        
+    except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'message': str(e)}})}\n\n"
+
