@@ -119,15 +119,33 @@ class ClaudeClient:
 
         cmd.extend(["--", prompt])
 
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        except subprocess.TimeoutExpired:
-            return ClaudeResult(
-                text="",
-                model=self.model,
-                is_error=True,
-                error_message="CLI timeout after 120 seconds",
-            )
+        # Retry logic for transient failures
+        max_retries = 2
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+                if result.returncode == 0:
+                    break  # Success
+
+                # Check if it's a transient error (exit code 1 with partial output)
+                if result.returncode == 1 and attempt < max_retries:
+                    import time
+                    time.sleep(1)  # Brief pause before retry
+                    continue
+
+                # Not retryable or out of retries
+                break
+
+            except subprocess.TimeoutExpired:
+                return ClaudeResult(
+                    text="",
+                    model=self.model,
+                    is_error=True,
+                    error_message="CLI timeout after 120 seconds",
+                )
 
         if result.returncode != 0:
             error_detail = f"Exit code {result.returncode}"

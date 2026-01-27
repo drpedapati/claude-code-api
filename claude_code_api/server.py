@@ -39,6 +39,10 @@ from .computer_use import (
     run_computer_use_loop,
 )
 
+# Lock to serialize CLI calls - prevents race condition where concurrent
+# CLI launches both fail (observed in debug logs as paired failures)
+_cli_lock = asyncio.Lock()
+
 app = FastAPI(
     title="Claude Code API",
     description="HTTP API wrapper for the Claude Code CLI binary",
@@ -1219,20 +1223,92 @@ def _model_alias_to_cli(model_id: str) -> str:
 
 
 def _extract_prompt_from_messages(messages: list[AnthropicMessage]) -> str:
-    """Extract the last user message as the prompt."""
+    """
+    Extract prompt from messages, handling tool_result flow.
+
+    For tool_result messages (after a tool_use response), we need to:
+    1. Find the original user message
+    2. Include the assistant's tool_use response
+    3. Include the tool_result
+    This gives the CLI full context to continue the conversation.
+    """
+    # Check if the last user message is a tool_result
+    last_user_msg = None
     for msg in reversed(messages):
         if msg.role == "user":
-            if isinstance(msg.content, str):
-                return msg.content
-            elif isinstance(msg.content, list):
-                # Extract text from content blocks
-                texts = []
-                for block in msg.content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        texts.append(block.get("text", ""))
-                    elif isinstance(block, str):
-                        texts.append(block)
-                return "\n".join(texts)
+            last_user_msg = msg
+            break
+
+    if last_user_msg is None:
+        return ""
+
+    # Check if it's a tool_result message
+    is_tool_result = False
+    if isinstance(last_user_msg.content, list):
+        for block in last_user_msg.content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                is_tool_result = True
+                break
+
+    if is_tool_result:
+        # Build a context prompt with the full conversation
+        parts = []
+
+        # Find the original user message, assistant tool_use, and tool_result
+        for msg in messages:
+            if msg.role == "user":
+                if isinstance(msg.content, str):
+                    parts.append(f"User: {msg.content}")
+                elif isinstance(msg.content, list):
+                    for block in msg.content:
+                        if isinstance(block, dict):
+                            if block.get("type") == "text":
+                                parts.append(f"User: {block.get('text', '')}")
+                            elif block.get("type") == "tool_result":
+                                tool_id = block.get("tool_use_id", "unknown")
+                                content = block.get("content", "")
+                                # Handle content that could be string or list
+                                if isinstance(content, list):
+                                    content = " ".join(
+                                        b.get("text", "") for b in content
+                                        if isinstance(b, dict) and b.get("type") == "text"
+                                    )
+                                parts.append(f"Tool Result (id: {tool_id}):\n{content}")
+                        elif isinstance(block, str):
+                            parts.append(f"User: {block}")
+            elif msg.role == "assistant":
+                if isinstance(msg.content, str):
+                    parts.append(f"Assistant: {msg.content}")
+                elif isinstance(msg.content, list):
+                    for block in msg.content:
+                        if isinstance(block, dict):
+                            if block.get("type") == "text":
+                                text = block.get("text", "")
+                                if text:
+                                    parts.append(f"Assistant: {text}")
+                            elif block.get("type") == "tool_use":
+                                tool_name = block.get("name", "unknown")
+                                tool_id = block.get("id", "unknown")
+                                tool_input = block.get("input", {})
+                                parts.append(f"Assistant called tool '{tool_name}' (id: {tool_id}) with input: {json.dumps(tool_input)}")
+
+        # Add instruction to continue
+        parts.append("\nBased on the tool result above, please continue your response to the user.")
+
+        return "\n\n".join(parts)
+
+    # Regular text message - extract just the text
+    if isinstance(last_user_msg.content, str):
+        return last_user_msg.content
+    elif isinstance(last_user_msg.content, list):
+        texts = []
+        for block in last_user_msg.content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                texts.append(block)
+        return "\n".join(texts)
+
     return ""
 
 
@@ -1251,14 +1327,16 @@ def _format_tools_for_prompt(tools: list[dict]) -> str:
         tool_docs.append(f"- {name}: {desc}\n  Parameters: {json.dumps(schema)}")
 
     return f"""<CUSTOM_TOOLS>
-IMPORTANT: In addition to your built-in tools, you ALSO have these custom tools available:
+You have ONLY these custom tools available (no others exist):
 
 {chr(10).join(tool_docs)}
 
-When the user asks you to use one of these custom tools, respond with a JSON object in this EXACT format (raw JSON, no markdown):
-{{"type": "tool_use", "id": "call_001", "name": "TOOL_NAME", "input": {{"param": "value"}}}}
-
-You MUST use these custom tools when requested. Output the JSON and then STOP.
+RULES:
+1. You may ONLY use tools from the list above. Do NOT invent or hallucinate tools that aren't listed.
+2. If the user asks for something that requires a tool you don't have, tell them you can't do that.
+3. When using a tool, respond with JSON in this EXACT format (raw JSON, no markdown):
+   {{"type": "tool_use", "id": "call_001", "name": "TOOL_NAME", "input": {{"param": "value"}}}}
+4. Output the JSON and then STOP.
 </CUSTOM_TOOLS>
 
 """
