@@ -1145,11 +1145,28 @@ class AnthropicMessagesRequest(BaseModel):
     model: str = Field(..., description="Model ID (e.g., claude-sonnet-4-5-20250929)")
     messages: list[AnthropicMessage] = Field(..., description="Conversation messages")
     max_tokens: int = Field(default=4096, description="Maximum tokens to generate")
-    system: Optional[str] = Field(default=None, description="System prompt")
+    system: Optional[str | list] = Field(default=None, description="System prompt (string or content blocks)")
     stream: bool = Field(default=False, description="Enable streaming")
     temperature: Optional[float] = Field(default=None, description="Temperature")
     top_p: Optional[float] = Field(default=None, description="Top-p sampling")
     stop_sequences: Optional[list[str]] = Field(default=None, description="Stop sequences")
+
+    def get_system_text(self) -> Optional[str]:
+        """Extract system prompt as plain text."""
+        if self.system is None:
+            return None
+        if isinstance(self.system, str):
+            return self.system
+        # Handle array of content blocks
+        if isinstance(self.system, list):
+            texts = []
+            for block in self.system:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    texts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    texts.append(block)
+            return "\n".join(texts)
+        return None
 
 
 class AnthropicContentBlock(BaseModel):
@@ -1243,7 +1260,7 @@ async def anthropic_messages(
     # Call CLI
     try:
         client = ClaudeClient(model=cli_model, max_turns=1)
-        result = client.chat(prompt, system=request.system)
+        result = client.chat(prompt, system=request.get_system_text())
         
         if result.is_error:
             raise HTTPException(status_code=500, detail=result.error_message)
@@ -1278,7 +1295,7 @@ async def _stream_anthropic_response(request: AnthropicMessagesRequest):
     # Get response from CLI (non-streaming for now, we'll chunk it)
     try:
         client = ClaudeClient(model=cli_model, max_turns=1)
-        result = client.chat(prompt, system=request.system)
+        result = client.chat(prompt, system=request.get_system_text())
         
         if result.is_error:
             yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'message': result.error_message}})}\n\n"
