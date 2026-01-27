@@ -1283,11 +1283,23 @@ async def _stream_anthropic_response(request: AnthropicMessagesRequest):
     """Stream response in Anthropic SSE format."""
     cli_model = _model_alias_to_cli(request.model)
     prompt = _extract_prompt_from_messages(request.messages)
-    
+
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-    
-    # Send message_start event
-    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': request.model}})}\n\n"
+    input_tokens = len(prompt.split()) * 2  # Rough estimate
+
+    # Send message_start event with usage
+    message_start = {
+        'type': 'message_start',
+        'message': {
+            'id': msg_id,
+            'type': 'message',
+            'role': 'assistant',
+            'content': [],
+            'model': request.model,
+            'usage': {'input_tokens': input_tokens, 'output_tokens': 0}
+        }
+    }
+    yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
     
     # Send content_block_start
     yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
