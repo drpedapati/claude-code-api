@@ -152,6 +152,16 @@ AVAILABLE_MODELS = [
         input_price="$5",
         output_price="$25",
     ),
+    ModelInfo(
+        id="opus-4-6",
+        api_id="claude-opus-4-6",
+        name="Claude Opus 4.6",
+        description="Most capable model with enhanced reasoning and agentic performance",
+        context_window=200_000,
+        max_output=64_000,
+        input_price="$5",
+        output_price="$25",
+    ),
 ]
 
 

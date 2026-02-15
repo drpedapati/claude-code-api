@@ -205,6 +205,7 @@ done
 | `haiku` | `claude-haiku-4-5-20251001` | Fastest | $1 / $5 |
 | `sonnet` | `claude-sonnet-4-5-20250929` | Balanced | $3 / $15 |
 | `opus` | `claude-opus-4-5-20251101` | Most capable | $5 / $25 |
+| `opus-4-6` | `claude-opus-4-6` | Most capable | $5 / $25 |
 
 ## API Key Security
 

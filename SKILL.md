@@ -329,6 +329,7 @@ curl -H "Authorization: Bearer $API_KEY" https://claude.cincibrainlab.com/llm/mo
 | `haiku` | Claude Haiku 4.5 | Fastest | Quick tasks, high volume |
 | `sonnet` | Claude Sonnet 4.5 | Balanced | Complex coding, analysis |
 | `opus` | Claude Opus 4.5 | Most capable | Research, difficult problems |
+| `opus-4-6` | Claude Opus 4.6 | Most capable | Enhanced reasoning, agentic tasks |
 
 ## Common Patterns
 
