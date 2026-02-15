@@ -164,6 +164,17 @@ AVAILABLE_MODELS = [
     ),
 ]
 
+# Model alias mapping: aliases not recognized by the CLI get mapped to full API IDs
+MODEL_ALIAS_MAP = {
+    m.id: m.api_id for m in AVAILABLE_MODELS
+    if m.id not in ("haiku", "sonnet", "opus")  # CLI knows these natively
+}
+
+
+def resolve_model(model: str) -> str:
+    """Resolve a model alias to the CLI-compatible model ID."""
+    return MODEL_ALIAS_MAP.get(model, model)
+
 
 # =============================================================================
 # Query API Models (Full SDK Support)
@@ -439,7 +450,7 @@ def llm_chat(request: ChatRequest, _: Optional[str] = Depends(verify_api_key)):
     ```
     """
     try:
-        client = ClaudeClient(model=request.model, max_turns=request.max_turns)
+        client = ClaudeClient(model=resolve_model(request.model), max_turns=request.max_turns)
         result = client.chat(request.prompt, system=request.system)
 
         return ChatResponse(
@@ -476,7 +487,7 @@ async def stream_chat_response(
         "--output-format", "stream-json",
         "--include-partial-messages",
         "--verbose",
-        "--model", model,
+        "--model", resolve_model(model),
         "--max-turns", str(max_turns),
     ]
 
@@ -619,7 +630,7 @@ def llm_json(request: ChatRequest, _: Optional[str] = Depends(verify_api_key)):
     ```
     """
     try:
-        client = ClaudeClient(model=request.model, max_turns=request.max_turns)
+        client = ClaudeClient(model=resolve_model(request.model), max_turns=request.max_turns)
         result = client.chat_json(request.prompt, system=request.system)
         return result
     except ValueError as e:
@@ -657,7 +668,7 @@ async def execute_query(request: QueryRequest) -> QueryResponse:
         "--input-format", "stream-json",
         "--output-format", "stream-json",
         "--verbose",
-        "--model", request.model,
+        "--model", resolve_model(request.model),
         "--max-turns", str(request.max_turns),
     ]
 
@@ -1038,7 +1049,7 @@ async def stream_computer_use(request: ComputerUseRequest) -> AsyncGenerator[str
     config = ComputerUseConfig(
         display_width=request.display_width,
         display_height=request.display_height,
-        model=request.model,
+        model=resolve_model(request.model),
         max_turns=request.max_turns,
         system_prompt=request.system_prompt,
     )

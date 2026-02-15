@@ -44,7 +44,7 @@ curl -X POST https://claude.cincibrainlab.com/llm/chat \
 ```json
 {
   "prompt": "Your question here",
-  "model": "haiku",           // haiku (fast), sonnet (balanced), opus (powerful)
+  "model": "haiku",           // haiku (fast), sonnet (balanced), opus (powerful), opus-4-6 (most capable)
   "system": "Optional system prompt",
   "max_turns": 1              // 1-10
 }
@@ -404,3 +404,23 @@ No hard rate limits, but costs are tracked per request. Use `max_budget_usd` to 
 Interactive documentation available at:
 - Swagger UI: https://claude.cincibrainlab.com/docs
 - ReDoc: https://claude.cincibrainlab.com/redoc
+
+## Deployment Architecture
+
+The API is deployed via [Kamal](https://kamal-deploy.org/) to a Hetzner server.
+
+**Pipeline:**
+1. Source code lives in the local repo and GitHub
+2. `make kamal-deploy` builds a Docker image from local source
+3. Image is pushed to GitHub Container Registry (`ghcr.io`)
+4. Kamal SSHs into the production server, pulls the image, and swaps containers
+5. Health check passes → old container is stopped
+
+**Key details:**
+- Production URL: `https://claude.cincibrainlab.com`
+- Server: Hetzner hel2 (65.21.128.110), amd64
+- Claude CLI version: 2.1.42 (installed in Docker image via npm)
+- API key hashes are injected as `API_KEY_HASHES` env var from `.kamal/secrets` (gitignored)
+- Claude auth uses OAuth token injected as `CLAUDE_CODE_OAUTH_TOKEN` env var
+- In-memory state (async job store) resets on each deploy
+- Claude CLI data persists in a Docker volume across deploys
